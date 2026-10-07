@@ -201,7 +201,7 @@ export default function SettingsPanel({ onClose }: Props) {
     setModelLists((m) => ({ ...m, [i]: { loading: true, models: m[i]?.models || [], err: '' } }));
     try {
       const proto = r.slot === 'custom' ? (r.protocol || 'openai') : (r.type === 'anthropic' ? 'anthropic' : 'openai');
-      const d = await fetchAvailableModels(r.baseUrl || '', r.keyNew || '', proto, r.slot || '');
+      const d = await fetchAvailableModels(r.baseUrl || '', r.keyNew || '', proto, r.slot || '', r.name || '');
       const fetchedAt = Date.now();
       setModelLists((m) => ({ ...m, [i]: { loading: false, models: d.models, err: d.models.length ? '' : '该端点没有返回模型', fetchedAt } }));
       if (d.models.length) {

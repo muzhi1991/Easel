@@ -130,6 +130,15 @@ def test_openai_slot_still_unchanged(sandbox):
 def _capture_probes(monkeypatch):
     """拦住真实网络请求，记录每次探测的 (url, headers)。"""
     seen: list[tuple[str, dict]] = []
+    # Protocol tests must not depend on the host's proxy/Fake-IP DNS.
+    def _dns(host, *_args):
+        import ipaddress
+        try:
+            address = str(ipaddress.ip_address(host))
+        except ValueError:
+            address = '8.8.8.8'
+        return [(2, 1, 6, '', (address, 0))]
+    monkeypatch.setattr(web.socket, 'getaddrinfo', _dns)
 
     class _Resp:
         status = 200

@@ -866,11 +866,11 @@ export interface ModelsFetchResponse { baseUrl: string; models: string[]; fetche
  * key 留空时后端按 slot 从已存配置里取（用户不用为了拉列表重贴一遍 Key）。
  */
 export function fetchAvailableModels(
-  baseUrl: string, key: string, protocol: string, slot = '',
+  baseUrl: string, key: string, protocol: string, slot = '', name = '',
 ): Promise<ModelsFetchResponse> {
   return request('/api/settings/models/available', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ baseUrl, key, protocol, slot }),
+    body: JSON.stringify({ baseUrl, key, protocol, slot, name }),
   });
 }

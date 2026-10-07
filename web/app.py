@@ -793,7 +793,20 @@ def _ssrf_safe(u: str) -> bool:
     """自测会带着真 Key 去打这个地址，所以不许指向本机/内网/云元数据——
     这些地址上的服务通常无鉴权，一旦被当成「模型端点」就成了打内网的跳板。"""
     try:
-        host = urllib.parse.urlparse(u).hostname or ''
+        parsed = urllib.parse.urlparse(u)
+        host = parsed.hostname or ''
+        origin = (parsed.scheme, host, parsed.port or (443 if parsed.scheme == 'https' else 80))
+        fake_ip_allowed = False
+        # Explicit local configuration for DNS proxies using the benchmark Fake-IP
+        # range. Match scheme/hostname/port; never relax real private-IP checks.
+        for entry in os.environ.get('EASEL_FAKE_IP_ORIGINS', '').split(','):
+            trusted = urllib.parse.urlparse(entry.strip())
+            if (trusted.scheme, trusted.hostname,
+                    trusted.port or (443 if trusted.scheme == 'https' else 80)) == origin:
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    fake_ip_allowed = True
         infos = socket.getaddrinfo(host, None)
     except Exception:  # noqa: BLE001  解析不了就当不安全
         return False
@@ -802,6 +815,8 @@ def _ssrf_safe(u: str) -> bool:
             ip = ipaddress.ip_address(info[4][0])
         except ValueError:
             return False
+        if fake_ip_allowed and ip.version == 4 and ip in ipaddress.ip_network('198.18.0.0/15'):
+            continue
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
             return False
     return True
@@ -1934,6 +1949,8 @@ async def api_models_available(req: ModelsFetchRequest):
         key = (_k or "").strip()
         if not base and _b:
             base = _b.strip().rstrip("/")
+    if not key:
+        raise HTTPException(400, "未找到 API Key，请确认供应商名称已保存，或填写 Key 后重试")
     if not base:
         raise HTTPException(400, "Base URL 不能为空")
     if not _valid_base_url(base):
@@ -1997,6 +2014,17 @@ async def api_models_selftest(req: SelftestRequest):
         ):
             if base.strip() and key.strip():
                 targets.append((base.strip().rstrip("/"), key.strip(), is_anthropic))
+        # Custom providers live in OpenClaw configuration rather than .env.
+        try:
+            config = json.loads(_oc_config_path().read_text(encoding='utf-8'))
+            for name, provider in config.get('models', {}).get('providers', {}).items():
+                if name in RESERVED_PROVIDER_KEYS or not isinstance(provider, dict):
+                    continue
+                base, key = str(provider.get('baseUrl') or '').strip(), str(provider.get('apiKey') or '').strip()
+                if base and key:
+                    targets.append((base.rstrip('/'), key, provider.get('api') == 'anthropic-messages'))
+        except (OSError, ValueError):
+            pass
     if channel in ("transcribe", "all") and (env.get("SILICONFLOW_API_KEY") or "").strip():
         targets.append(((env.get("SILICONFLOW_BASE_URL") or "https://api.siliconflow.cn/v1").strip().rstrip("/"),
                         env["SILICONFLOW_API_KEY"].strip(), False))
@@ -2038,7 +2066,7 @@ async def api_models_selftest(req: SelftestRequest):
 
     def _run_probes() -> list[dict]:
         out: list[dict] = []
-        for base, key, is_anthropic in targets:
+        for base, key, is_anthropic in dict.fromkeys(targets):
             out.append(_probe(base, key, anthropic=is_anthropic))
         return out
 

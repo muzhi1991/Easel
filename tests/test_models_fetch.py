@@ -46,6 +46,16 @@ def sandbox(tmp_path, monkeypatch):
         yield c
 
 
+def test_fetch_missing_custom_identity_does_not_send_empty_key(sandbox, monkeypatch):
+    seen = []
+    _stub_opener(monkeypatch, b'{"data": []}', seen)
+    response = sandbox.post('/api/settings/models/available', json={
+        'slot': 'custom', 'baseUrl': 'https://custom.example.com/v1',
+    })
+    assert response.status_code == 400
+    assert not seen
+
+
 class _Resp:
     def __init__(self, payload: bytes, status: int = 200):
         self._payload, self.status = payload, status
