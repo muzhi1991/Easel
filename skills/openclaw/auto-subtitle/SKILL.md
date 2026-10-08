@@ -6,7 +6,7 @@ layer: produce
 
 # 自动字幕（语音转字幕）
 
-把音频/视频里的人声识别成字幕。基于共享脚本 `skills/shared/scripts/asr.py`（faster-whisper 封装），
+把音频/视频里的人声识别成字幕。基于共享脚本 `skills/shared/scripts/asr.py`（统一媒体适配入口），
 参数确定、可复现，做中文友好断句。可选把字幕烧录进视频（复用 `skills/shared/scripts/video_ops.py` / ffmpeg subtitles 滤镜）。
 
 > 只做"语音 → 字幕文件 (+ 可选烧录)"。通用视频剪辑见 **video-editing**；纯降噪见 **audio-denoise**；长视频智能切片+烧字幕见 **clipify**。
@@ -18,7 +18,8 @@ layer: produce
 | input_file | 是 | 音频或视频文件路径（视频自动提取音轨） |
 | format | 否 | `srt`（默认）/ `ass` / `txt` / `json` |
 | language | 否 | `auto`（默认）或 `zh`/`en` 等 ISO 639-1 码 |
-| model | 否 | `tiny`/`base`（默认）/`small`/`medium`/`large-v3`，越大越准越慢 |
+| provider | 否 | 设置页配置的实例 ID；不填则使用默认转写实例 |
+| provider_model | 否 | 可选的远程模型覆盖；通常沿用实例配置 |
 | burn | 否 | 是否把字幕烧录进视频（需视频输入） |
 
 支持：mp3/wav/m4a/aac/flac 等音频；mp4/mkv/mov/webm 等视频。
@@ -31,9 +32,11 @@ layer: produce
 
 ## 前置
 
-- 首次运行会从 HuggingFace 下模型，**需外网代理**。脚本读取 `EASEL_PROXY` 或 `http(s)_proxy` 环境变量作代理；
-  都未设则直连。也可先 `export https_proxy=... http_proxy=...` 指定。
-- CPU 环境用默认 `--device cpu --compute-type int8` 即可。
+- 使用项目 `.venv/bin/python`，安装媒体适配包并在设置页配置默认转写供应商。
+- 当前内网 Qwen ASR + 对齐：默认按约 30 秒、优先静音处分片，使用真实时间戳，长文件自动串行处理。
+- 已有可信 SRT/VTT 直接使用，不重复转写。服务失败明确报错，不自动回退或下载 Whisper。
+- 仅用户明确选择 `--provider whisper` 时使用可选本地后端；此时 `--model base` 等旧参数才生效。
+- 迁移、新服务接入与验证见 `docs/media-adapters.md`。
 
 ## 执行步骤
 
@@ -43,14 +46,14 @@ layer: produce
 
 ```bash
 # 视频 → SRT（自动提取音轨 + 自动检测语言）
-python skills/shared/scripts/asr.py transcribe \
+.venv/bin/python skills/shared/scripts/asr.py transcribe \
   -i input.mp4 -o outputs/主题名/input.srt --language zh
 
 # 视频 → ASS（带样式，**字号/边距按视频横竖屏自适应**）：视频输入自动探测宽高
-python skills/shared/scripts/asr.py transcribe \
-  -i input.mp4 -o outputs/主题名/input.ass --format ass --model small
+.venv/bin/python skills/shared/scripts/asr.py transcribe \
+  -i input.mp4 -o outputs/主题名/input.ass --format ass --language zh
 # 纯音频 → ASS：无法探测尺寸，默认竖屏 1080x1920；横屏加 --res 1920x1080
-python skills/shared/scripts/asr.py transcribe \
+.venv/bin/python skills/shared/scripts/asr.py transcribe \
   -i voice.mp3 -o outputs/主题名/voice.ass --format ass --res 1920x1080
 ```
 
@@ -59,7 +62,7 @@ python skills/shared/scripts/asr.py transcribe \
   **要带样式的硬字幕优先烧这份 ASS**（下节），比裸 SRT + 手填 force_style 更省心、且自适应。
 - 中文默认每行 ~18 字，超长自动断行/拆条；`--max-line-chars` 可调。
 - 不给 `-o` 时按输入文件名建项目目录，例如 `talk.mp4` 输出到 `outputs/talk/talk.srt`；已有项目应显式 `-o outputs/主题名/<文件名>.<format>`。
-- 查看可用模型/语言：`python skills/shared/scripts/asr.py info`。
+- 查看可用模型/语言：`.venv/bin/python skills/shared/scripts/asr.py info`。
 
 ### 2.（可选）把字幕烧录进视频
 
@@ -83,14 +86,14 @@ ffmpeg -y -i input.mp4 \
 ### 3. 产物与报告
 
 - 字幕文件、烧录视频均写入 `outputs/主题名/`。
-- 向用户报告：识别语言、字幕条数、模型、文件路径；提示可换 `--model`/`--max-line-chars` 重跑。
+- 向用户报告：识别语言、字幕条数、模型、文件路径；提示可换 `--provider`/`--max-line-chars` 重跑。
 
 ## 规则
 
 1. **视频先提取音轨** — 脚本自动用 ffmpeg 提取 16kHz 单声道 wav，不改原视频。
 2. **中文友好断句** — 按标点/长度断行，避免一行过长。
 3. **绝不删原文件** — 只产出新文件到 `outputs/`。
-4. **模型选择** — 求快用 `base`，求准用 `small`/`medium`；CPU 用 int8。
+4. **供应商选择** — 沿用设置页默认实例；不可自行改为 Whisper 或现场下载模型。
 5. **烧录需视频输入** — 纯音频无法烧录，只出字幕文件。
 6. **无 Profile 依赖** — 转录不需要账号画像。
 

@@ -28,8 +28,14 @@ add("deps/remotion 蓝本", d.is_file(), "在" if d.is_file() else "缺", True)
 need_tools = ["tools/transcribe.py", "tools/check_sync.py", "tools/rvm_matte.py"]
 missing = [t for t in need_tools if not (SDK_ROOT / t).is_file()]
 add("SDK tools", not missing, "齐" if not missing else f"缺: {missing}", True)
-add("faster-whisper", importlib.util.find_spec("faster_whisper") is not None,
-    "转录链（有现成转录稿可忽略）", False)
+try:
+    from easel.media import runtime
+    provider, _adapter = runtime().resolve("transcribe")
+    add("媒体转写配置", True, provider["name"] + "（配置检查，不代表服务在线）", False)
+except (ImportError, RuntimeError) as exc:
+    add("媒体转写配置", False, str(exc), False)
+add("faster-whisper（可选）", importlib.util.find_spec("faster_whisper") is not None,
+    "仅显式手动调用；默认转写不需要本地 Whisper 模型", False)
 try:
     import torch
     add("torch CUDA", True, f"cuda={torch.cuda.is_available()}", False)

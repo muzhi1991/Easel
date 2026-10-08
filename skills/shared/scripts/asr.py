@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""asr.py — 语音转字幕（ASR）的确定性封装（faster-whisper + 标准库）。
+"""asr.py — 统一媒体适配器转写；faster-whisper 仅作为显式可选后端。
 
 所有"语音/视频 → 字幕文件"类 SKILL（auto-subtitle 等）共用此脚本，避免每次
 现场即兴调 whisper 导致的模型选择、时间戳格式、中文断句不一致等问题。
@@ -7,8 +7,8 @@
 与 video_ops.py 的边界：本脚本只负责"识别语音 → 生成字幕文件（SRT/ASS/TXT/JSON）"，
 不负责把字幕烧录进视频；烧录用 video_ops.py 或 ffmpeg subtitles/ass 滤镜。
 
-依赖：faster-whisper（`pip install faster-whisper`）+ ffmpeg（视频提取音轨）。
-首次运行会从 HuggingFace 下载模型，需外网代理（见下方 _ensure_proxy）。
+依赖：easel-media-adapters + FFmpeg。默认实例在设置页配置。
+仅 --provider whisper 需要 faster-whisper，并可能下载模型。
 
 子命令（均支持 -h）：
     transcribe  音频/视频 → 字幕（--format srt/ass/txt/json）
@@ -30,6 +30,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 # ── 常量 ──────────────────────────────────────────────────────────────
 # 默认外网代理（faster-whisper 首次从 HuggingFace 下模型时用）。
@@ -258,11 +260,13 @@ def _render_json(cues: list[tuple[float, float, str]], meta: dict) -> str:
             for i, (s, e, t) in enumerate(cues, 1)
         ],
     }
+    if meta.get("timestamp_source"):
+        data["segments"] = meta["segments"]  # Keep real words for downstream editors.
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 # ── 转录核心 ──────────────────────────────────────────────────────────
-def _transcribe_audio(audio: Path, a) -> tuple[list[tuple[float, float, str]], dict]:
+def _transcribe_whisper(audio: Path, a) -> tuple[list[tuple[float, float, str]], dict]:
     try:
         from faster_whisper import WhisperModel
     except ImportError:
@@ -315,6 +319,19 @@ def _transcribe_audio(audio: Path, a) -> tuple[list[tuple[float, float, str]], d
     return cues, meta
 
 
+def _transcribe_audio(audio: Path, a) -> tuple[list[tuple[float, float, str]], dict]:
+    # Explicit optional local backend only; never download Whisper as a failure fallback.
+    if getattr(a, "provider", None) == "whisper":
+        return _transcribe_whisper(audio, a)
+    from easel.media import transcribe
+    result = transcribe(audio, language=a.language, provider=getattr(a, "provider", None),
+                        model=getattr(a, "provider_model", None), max_line_chars=a.max_line_chars)
+    for note in result.get("warnings", []):
+        print(f"[asr] 警告：{note}", file=sys.stderr)
+    cues = [(s["start"], s["end"], s["text"]) for s in result["segments"]]
+    return cues, result
+
+
 def cmd_transcribe(a) -> int:
     src = _require_input(a.input)
     is_video = src.suffix.lower() in _VIDEO_EXT
@@ -327,6 +344,7 @@ def cmd_transcribe(a) -> int:
             audio = tmp_audio
 
         cues, meta = _transcribe_audio(audio, a)
+        meta["source"] = str(src)
         if not cues:
             print("[asr] 警告：未识别到任何语音内容（可能是静音或纯音乐）。",
                   file=sys.stderr)
@@ -370,7 +388,9 @@ def cmd_transcribe(a) -> int:
 
 
 def cmd_info(a) -> int:
-    print("可用模型（--model，越大越准越慢，CPU 建议 base/small）：")
+    from easel.media import runtime
+    print("媒体默认配置：", json.dumps(runtime().load(), ensure_ascii=False))
+    print("以下模型仅用于手动 --provider whisper（默认不下载）：")
     for m in _MODELS:
         tag = "（默认）" if m == "base" else ""
         print(f"  - {m}{tag}")
@@ -437,6 +457,8 @@ def _add_transcribe_args(p) -> None:
                    help="输出路径（默认 outputs/<输入文件名>/<输入文件名>.<format>）")
     p.add_argument("--format", choices=["srt", "ass", "txt", "json"],
                    default="srt", help="输出格式（默认 srt）")
+    p.add_argument("--provider", help="配置实例 ID；whisper 为手动选择的本地可选后端")
+    p.add_argument("--provider-model", help="覆盖远程供应商模型；--model 仅用于显式 whisper")
     p.add_argument("--model", default="base",
                    help=f"模型 {'/'.join(_MODELS)}（默认 base）")
     p.add_argument("--language", default="auto",
@@ -453,7 +475,7 @@ def _add_transcribe_args(p) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="语音转字幕 ASR（faster-whisper 封装）。子命令均支持 -h。",
+        description="语音转字幕 ASR（统一适配器入口）。子命令均支持 -h。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--selftest", action="store_true",
@@ -478,7 +500,11 @@ def main() -> int:
     if not getattr(args, "cmd", None):
         ap.print_help()
         return 1
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"[asr] 转写失败：{exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

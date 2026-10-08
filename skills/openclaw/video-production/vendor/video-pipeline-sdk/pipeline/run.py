@@ -208,11 +208,7 @@ def st_ingest(ctx: dict) -> tuple[str, str]:
 
 
 def st_transcribe(ctx: dict) -> tuple[str, str]:
-    """转录 · 三级降级（Easel 内置改造）：
-      tier1 现成稿（--transcript）：.json 直接用；.srt/.vtt 转段级 transcript.json
-      tier2 云端 ASR API（有 SILICONFLOW_API_KEY 时）
-      tier3 本地 whisper large-v3（兜底，需自备/下载 3GB 模型）
-    """
+    """已有字幕优先；否则使用配置的媒体转写实例，失败不自动换后端。"""
     rd, st = ctx["rd"], ctx["state"]
     art = rd / "artifacts"; art.mkdir(exist_ok=True)
     tgt = art / "transcript.json"
@@ -242,26 +238,12 @@ def st_transcribe(ctx: dict) -> tuple[str, str]:
 
     src = str(rd / "artifacts" / "proxy.mp4") if (rd / "artifacts" / "proxy.mp4").exists() else st["source"]
 
-    # ---- tier2：云端 ASR API（配了 key 才走）----
-    if os.environ.get("SILICONFLOW_API_KEY", "").strip():
-        code, out = run_cmd([sys.executable, str(SDK_ROOT / "tools" / "transcribe_api.py"),
-                             "--src", src, "--out", str(tgt)], log_path=log)
-        if code == 0:
-            return "done", "转录完成（tier2·云端 ASR）"
-        # API 失败不直接判死：若本地 whisper 可用则继续兜底
-        try:
-            import faster_whisper  # noqa: F401
-        except ImportError:
-            return "error", f"tier2 云端转录失败且本地 whisper 不可用：{out[-300:]}"
-        # 落到 tier3
-
-    # ---- tier3：本地 whisper（兜底）----
-    code, out = run_cmd([sys.executable, str(SDK_ROOT / "tools" / "transcribe.py"),
+    # Unified adapter seam. Failure is explicit: no implicit Whisper download/fallback.
+    code, out = run_cmd([sys.executable, "-m", "easel.media", "transcribe",
                          "--src", src, "--out", str(tgt)], log_path=log)
     if code != 0:
-        return "error", ("转录三级均不可用：给 --transcript(srt/vtt/json)，"
-                         f"或设 SILICONFLOW_API_KEY 走云端，或装 faster-whisper+large-v3。详情：{out[-300:]}")
-    return "done", "转录完成（tier3·本地 whisper）"
+        return "error", f"配置的媒体转写失败（不自动回退）：{out[-800:]}"
+    return "done", "转录完成（统一媒体适配器）"
 
 
 def st_scenes(ctx: dict) -> tuple[str, str]:

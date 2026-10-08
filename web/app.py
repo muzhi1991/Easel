@@ -1471,6 +1471,58 @@ async def api_settings_models():
     return _model_channels()
 
 
+# Generic media extension seam. Descriptors come only from installed trusted adapters.
+class MediaProviderSaveRequest(BaseModel):
+    provider: dict
+    defaultChannels: list[str] = Field(default_factory=list)
+
+
+def _media_runtime():
+    from easel.media import runtime
+    return runtime()
+
+
+@app.get("/api/settings/media")
+async def api_media_providers():
+    try:
+        rt = _media_runtime()
+        return {"adapters": rt.describe(), **rt.load()}
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/settings/media")
+async def api_media_save(req: MediaProviderSaveRequest):
+    # This LAN UI cannot be used to forward arbitrary existing process secrets.
+    try:
+        rt = _media_runtime()
+        clean = rt.validate(req.provider)
+        ref = clean["settings"].get("api_key_env", "")
+        if ref and not re.fullmatch(r"EASEL_MEDIA_[A-Z0-9_]+", str(ref)):
+            raise HTTPException(400, "媒体凭证需使用专用 EASEL_MEDIA_* 环境变量")
+        rt.save_provider(clean, req.defaultChannels)
+        return await api_media_providers()
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/settings/media/{provider_id}")
+async def api_media_delete(provider_id: str):
+    try:
+        _media_runtime().remove_provider(provider_id)
+        return await api_media_providers()
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/settings/media/{provider_id}/probe")
+async def api_media_probe(provider_id: str):
+    try:
+        return await asyncio.to_thread(_media_runtime().probe, provider_id)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 def _write_env_direct(updates: dict[str, str]) -> None:
     """后端受控键位专用：就地更新/追加 .env（不做 allowlist 过滤，仅服务端固定映射调用）。原子写。"""
     updates = {k: v for k, v in updates.items() if k and v.strip() != ''}

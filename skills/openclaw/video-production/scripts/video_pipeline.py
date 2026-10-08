@@ -176,19 +176,15 @@ def post_deliver(base: Path, rd: Path):
 # ---------------------------------------------------------------- commands --
 
 def report_transcription_tiers(sdk: Path) -> None:
-    """打印三级转录策略可用性（Easel 内置改造）。"""
-    print("转录三级策略（优先级从上到下）：")
-    print("  tier1 现成稿  ：start 时给 --transcript（.srt/.vtt 自动转段级，.json 直接用）— 有则最省")
-    key_on = bool(os.environ.get("SILICONFLOW_API_KEY", "").strip())
-    model = os.environ.get("SILICONFLOW_ASR_MODEL", "XingChenAGI/XingChenGSR-V1.0")
-    print(f"  tier2 云端API ：SILICONFLOW_API_KEY {'已配置 ✓' if key_on else '未配置（export 后启用）'}"
-          f" · model={model}")
+    """只报告配置；模型、端点和执行逻辑均留在独立适配层。"""
+    print("转录策略：已有字幕优先，否则使用默认媒体供应商；失败不自动回退")
     try:
-        import faster_whisper  # noqa: F401
-        fw = "已装 ✓"
-    except ImportError:
-        fw = "未装"
-    print(f"  tier3 本地whisper：faster-whisper {fw}（兜底，首次需下 large-v3 约 3GB）")
+        from easel.media import runtime
+        provider, _adapter = runtime().resolve("transcribe")
+        print(f"  默认供应商：{provider['name']} ({provider['id']})")
+    except RuntimeError as exc:
+        print(f"  默认转写未就绪：{exc}")
+    print("  Whisper：仅显式手动使用，不自动下载模型")
 
 
 def cmd_doctor(args) -> int:

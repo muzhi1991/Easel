@@ -6,6 +6,29 @@ function getBasePath(): string {
 
 const BASE = getBasePath();
 
+export interface MediaField {
+  key: string; label: string; type: 'text' | 'url' | 'number' | 'boolean' | 'secret_ref';
+  required?: boolean; default?: string | number | boolean; min?: number; max?: number; choices?: string[];
+}
+export interface MediaAdapter {
+  id: string; name: string; channels: string[]; capabilities: string[]; fields: MediaField[];
+}
+export interface MediaProvider {
+  id: string; name: string; adapter: string; settings: Record<string, string | number | boolean>;
+}
+export interface MediaConfiguration {
+  schema_version: number; adapters: MediaAdapter[]; providers: MediaProvider[]; defaults: Record<string, string>;
+}
+export const fetchMediaProviders = () => request<MediaConfiguration>('/api/settings/media');
+export const saveMediaProvider = (provider: MediaProvider, defaultChannels: string[] = []) =>
+  request<MediaConfiguration>('/api/settings/media', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, defaultChannels }),
+  });
+export const deleteMediaProvider = (id: string) =>
+  request<MediaConfiguration>(`/api/settings/media/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const probeMediaProvider = (id: string) =>
+  request<{ ok: boolean; detail: string }>(`/api/settings/media/${encodeURIComponent(id)}/probe`, { method: 'POST' });
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // 全部是动态应用接口（登录态/数据等），禁止浏览器 HTTP 缓存——否则 /api/accounts 等可能被启发式
   // 缓存住旧响应（曾表现为“扫码登录后卡片仍显示未登录”）。调用方可用 options.cache 覆盖。

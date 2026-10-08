@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Dispatch, SetStateAction } from 'react';
 import EnvBoard from './EnvBoard';
+import MediaProviders from './MediaProviders';
 import type { JobView } from './EnvBoard';
 import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
@@ -307,16 +308,6 @@ export default function SettingsPanel({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // 本地兜底 whisper：从环境工具状态推出来（fw + 模型都在才算就绪）
-  const fw = tools.find((t) => t.id === 'fw');
-  const modelTool = tools.find((t) => t.id === 'model');
-  const localReady = fw?.state === 'ok' && modelTool?.state === 'ok';
-  const localRow: ModelRow = {
-    order: 2, name: 'local-whisper', sub: '本机兜底 · 免 key', type: 'local',
-    model: 'faster-whisper', baseUrl: '本机', keyMasked: '—', role: '备',
-    result: localReady ? '✓ 已就绪' : (tools.length ? '未装（去环境安装）' : '检测中…'),
-  };
-
   const resultText = (row: ModelRow): { text: string; cls: string } => {
     const st = row.baseUrl && row.baseUrl !== '—' ? selftest?.byBase[row.baseUrl] : undefined;
     if (st) return st.ok ? { text: `✓ ${st.ms}ms`, cls: 'good' } : { text: `✗ ${(st.detail || '失败').slice(0, 42)}`, cls: 'bad' };
@@ -568,7 +559,6 @@ export default function SettingsPanel({ onClose }: Props) {
   );
 
   const chatOk = chatRows.length > 0 && !chatRows[0].result.includes('缺');
-  const transOk = transRows.length > 1 && transRows[1].result.includes('已配置');
 
   return (
     <div
@@ -585,14 +575,14 @@ export default function SettingsPanel({ onClose }: Props) {
             <button
               className="btn btn-sm btn-primary"
               onClick={() => void saveCurrent()}
-              disabled={saving || sec !== 'model'}
+              disabled={saving || sec !== 'model' || chan === 'transcribe'}
             >
               {saving ? '保存中…' : '保存配置'}
             </button>
             <button
               className="btn btn-sm"
               onClick={() => void doSelftest(sec === 'model' ? chan : 'all')}
-              disabled={testing}
+              disabled={testing || (sec === 'model' && chan === 'transcribe')}
             >
               {testing ? '自测中…' : '全部自测'}
             </button>
@@ -696,13 +686,11 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'transcribe' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '主通道在线' : (localReady ? '本地兜底生效' : '备用待安装')}</span>
-                      <span className="desc">三级链：自带字幕 → API → 本地兜底</span>
-                      <span className="spacer" />
-                      <button className="btn btn-sm" onClick={() => void doSelftest('transcribe')} disabled={testing}>自测本通道</button>
+                      <span className="desc">已有字幕优先 → 默认转写供应商；失败明确报错</span>
                     </div>
-                    {renderBoard([...transRows, localRow], { onRow: (i, p) => updateRow(setTransRows, i, p) })}
-                    <div className="foot-note">有字幕不下模型；API 通道缺 key 自动落到本地 whisper（本地组件在「环境安装」页装）。保存即写入 .env 生效。</div>
+                    {renderBoard(transRows.filter((r) => !r.slot))}
+                    <MediaProviders channel="transcribe" />
+                    <div className="foot-note">每行单独保存，下一次任务生效。连接探活不代表识别质量；不自动下载或回退 Whisper。Whisper 仅可通过命令行手动选择。</div>
                   </section>
                 )}
 
@@ -715,6 +703,7 @@ export default function SettingsPanel({ onClose }: Props) {
                     </div>
                     {renderBoard(mediaRows.speech || [], { onRow: (i, p) => updateMediaRow('speech', i, p), onPrimary: (i) => setMediaPrimary('speech', i), media: true })}
                     <div className="foot-note">配音脚本按「主」provider 合成；本地 VoxCPM / edge-tts 在视频产线里可直接替代。</div>
+                    <MediaProviders channel="speech" />
                   </section>
                 )}
 
@@ -727,6 +716,7 @@ export default function SettingsPanel({ onClose }: Props) {
                     </div>
                     {renderBoard(mediaRows.image || [], { onRow: (i, p) => updateMediaRow('image', i, p), media: true })}
                     <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。</div>
+                    <MediaProviders channel="image" />
                   </section>
                 )}
 
@@ -739,6 +729,7 @@ export default function SettingsPanel({ onClose }: Props) {
                     </div>
                     {renderBoard(mediaRows.video || [], { onRow: (i, p) => updateMediaRow('video', i, p), onPrimary: (i) => setMediaPrimary('video', i), media: true })}
                     <div className="foot-note">脚本按「主」provider 出片；同类多家的自动降级随统一网关接入开放。</div>
+                    <MediaProviders channel="video" />
                   </section>
                 )}
 
@@ -750,6 +741,7 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="spacer" />
                     </div>
                     {renderBoard(mediaRows.music || [], { onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true })}
+                    <MediaProviders channel="music" />
                   </section>
                 )}
 
@@ -791,7 +783,7 @@ export default function SettingsPanel({ onClose }: Props) {
         </div>
 
         <div className="settings-foot">
-          ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存写入 .env（对话经本地网关路由，主备自动降级）。
+          ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存在服务端，按各通道的保存按钮生效。
         </div>
       </div>
     </div>
