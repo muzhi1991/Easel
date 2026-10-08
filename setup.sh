@@ -253,7 +253,7 @@ if [ -z "$NPM_REGISTRY" ]; then
         warn "npmjs.org 连通性差，自动使用国内镜像 npmmirror.com（可用 EASEL_NPM_REGISTRY 覆盖）"
     fi
 else
-    ok "npm registry: $NPM_REGISTRY（EASEL_NPM_REGISTRY 指定）"
+    ok "npm registry: ${NPM_REGISTRY}（EASEL_NPM_REGISTRY 指定）"
 fi
 NPM_REGISTRY_ARGS=(--registry "$NPM_REGISTRY")
 
@@ -338,7 +338,7 @@ if [ -z "$PIP_INDEX" ]; then
     fi
 else
     PIP_INDEX_ARGS=(-i "$PIP_INDEX")
-    ok "PyPI: $PIP_INDEX（EASEL_PIP_INDEX 指定）"
+    ok "PyPI: ${PIP_INDEX}（EASEL_PIP_INDEX 指定）"
 fi
 # --prefer-binary: 新版 biliup 常先发 sdist 后补 wheel，源码构建要求最新 rustc；优先选有 wheel 的旧版本
 PIP_ARGS=(install -e "$PROJECT_ROOT" --prefer-binary --progress-bar on ${PIP_INDEX_ARGS[@]+"${PIP_INDEX_ARGS[@]}"})
