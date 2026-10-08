@@ -1207,8 +1207,18 @@ async def api_env_save(req: EnvUpdateRequest):
 # ═══════════════════════════════════════════════════════════════════════
 
 INSTALL_TOOL = SHARED_SCRIPTS / "install_tool.py"
+REMOTION_DIR = PROJECT_ROOT / "skills" / "openclaw" / "video-production" / "vendor" / "video-pipeline-sdk" / "deps" / "remotion"
 _ENV_TOOLS_CACHE: dict = {"ts": 0.0, "data": None}
 _ENV_JOBS: dict[str, dict] = {}
+
+
+def _env_tool_command(command: str, *ids: str) -> list[str]:
+    # Match the Python environment used by login/publishing, not another PATH Python.
+    argv = [sys.executable, str(INSTALL_TOOL), "--python", sys.executable,
+            "--json", command, *ids]
+    if command in ("check", "install"):
+        argv += ["--dir", str(REMOTION_DIR)]
+    return argv
 
 
 @app.get("/api/env/tools")
@@ -1218,7 +1228,7 @@ async def api_env_tools(refresh: bool = False):
         return _ENV_TOOLS_CACHE["data"]
     try:
         proc = await asyncio.to_thread(lambda: subprocess.run(
-            [sys.executable, str(INSTALL_TOOL), "--json", "check"],
+            _env_tool_command("check"),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=240, cwd=str(PROJECT_ROOT)))
     except subprocess.TimeoutExpired:
@@ -1247,7 +1257,7 @@ def _install_tool_ids() -> frozenset[str]:
     if _INSTALL_IDS_CACHE["ids"] and time.time() - _INSTALL_IDS_CACHE["ts"] < 300:
         return _INSTALL_IDS_CACHE["ids"]
     try:
-        p = subprocess.run([sys.executable, str(INSTALL_TOOL), "--json", "list"],
+        p = subprocess.run(_env_tool_command("list"),
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=30, cwd=str(PROJECT_ROOT))
         ids = frozenset(t["id"] for t in (json.loads(p.stdout).get("tools") or []) if t.get("id"))
@@ -1278,7 +1288,7 @@ async def api_env_install(req: EnvInstallRequest):
         proc = None
         try:
             proc = subprocess.Popen(
-                [sys.executable, str(INSTALL_TOOL), "--json", "install", tid],
+                _env_tool_command("install", tid),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", cwd=str(PROJECT_ROOT))
             # stdout 必须**并发**抽干：串行地先读完 stderr 再读 stdout，子进程一旦往 stdout

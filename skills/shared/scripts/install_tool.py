@@ -64,7 +64,21 @@ WHISPER_MODEL_PY = (
 )
 
 
-def _pyfn_check_cft() -> tuple[bool, str]:
+PLAYWRIGHT_BROWSER_CHECK = (
+    "from pathlib import Path;from playwright.sync_api import sync_playwright;"
+    "import sys;"
+    "\nwith sync_playwright() as p:\n"
+    " binary=Path(p.chromium.executable_path)\n"
+    " print(binary.name if binary.is_file() else 'Chromium binary missing')\n"
+    " sys.exit(0 if binary.is_file() else 1)\n"
+)
+
+
+def _pyfn_check_cft(python: str) -> tuple[bool, str]:
+    # Playwright's bundled Chrome is platform-specific (including macOS .app).
+    proc = _run([python, "-c", PLAYWRIGHT_BROWSER_CHECK], timeout=30)
+    if proc.returncode == 0:
+        return True, proc.stdout.strip()
     import glob
     la = os.environ.get("LOCALAPPDATA", "")
     pf, pf86 = os.environ.get("PROGRAMFILES", ""), os.environ.get("PROGRAMFILES(X86)", "")
@@ -75,9 +89,14 @@ def _pyfn_check_cft() -> tuple[bool, str]:
     if la:
         cands += glob.glob(os.path.join(la, "Google", "Chrome for Testing", "*", "chrome.exe"))
         cands += glob.glob(os.path.join(la, "ms-playwright", "chromium-*", "chrome-win64", "chrome.exe"))
+    for apps in (Path("/Applications"), Path.home() / "Applications"):
+        binary = apps / "Google Chrome for Testing.app" / "Contents" / "MacOS" / "Google Chrome for Testing"
+        if binary.is_file():
+            cands.append(str(binary))
     w = shutil.which("chrome")
     if w:
         cands.append(w)
+    cands = [p for p in cands if Path(p).is_file()]
     if cands:
         return True, Path(sorted(cands)[-1]).parent.parent.name or "已装"
     return False, ""
@@ -134,7 +153,7 @@ TOOLS: list[Tool] = [
          ["biliup", "--version"],
          _pip_chain("biliup", timeout=1800)),
     Tool("pw", "Playwright Chromium", "pub", "小红书 / 快手 / 知乎 发布链浏览器",
-         ["{python}", "-c", "import playwright;print('playwright ok')"],
+         ["{python}", "-c", PLAYWRIGHT_BROWSER_CHECK],
          _pip_chain("playwright")
          + [("下载 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)]),
     Tool("cft", "Chrome for Testing", "pub", "登录态浏览器 · 平台登录用",
@@ -315,11 +334,13 @@ def check_tool(tool: Tool, python: str, dir_: str | None = None) -> dict:
             name = tool.check[0].split(":", 1)[1]
             if name == "shell":  # 依赖工程目录（无 dir 已在前面返回 no_dir）
                 import glob
-                g = glob.glob(os.path.join(dir_, "node_modules", ".remotion", "**",
-                                           "chrome-headless-shell*"), recursive=True)
+                g = [p for p in glob.glob(os.path.join(dir_, "node_modules", ".remotion", "**",
+                                                      "chrome-headless-shell*"), recursive=True)
+                     if Path(p).is_file() and Path(p).name in
+                     ("chrome-headless-shell", "chrome-headless-shell.exe")]
                 return {"id": tool.id, "state": "ok" if g else "missing",
                         "version": "已缓存" if g else None, "detail": None}
-            ok, detail = _PYFN[name]()
+            ok, detail = _pyfn_check_cft(python) if name == "cft" else _PYFN[name]()
             return {"id": tool.id, "state": "ok" if ok else "missing",
                     "version": detail if ok else None, "detail": None}
         argv = _fill(tool.check, python, dir_)
