@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { deleteMediaProvider, fetchMediaProviders, probeMediaProvider, saveMediaProvider } from '../lib/api';
-import type { MediaConfiguration, MediaProvider } from '../lib/api';
+import type { MediaConfiguration, MediaProvider, ModelRow } from '../lib/api';
 
 /** Descriptor-driven extension UI: no Qwen fields or endpoint knowledge here. */
-export default function MediaProviders({ channel }: { channel: string }) {
+export default function MediaProviders({ channel, builtInRows = [] }: { channel: string; builtInRows?: ModelRow[] }) {
   const [config, setConfig] = useState<MediaConfiguration | null>(null);
   const [draft, setDraft] = useState<MediaProvider | null>(null);
   const [editing, setEditing] = useState(false);
@@ -47,41 +47,58 @@ export default function MediaProviders({ channel }: { channel: string }) {
   };
 
   // Other channels can use this same UI when their first execution adapter is installed.
-  if (!adapters.length && config) return null;
+  if (!adapters.length && config && !builtInRows.length) return null;
   return (
     <div style={{ marginTop: 16 }}>
       <div className="panel-top">
-        <strong>自定义媒体供应商</strong><span className="spacer" />
+        <span className="spacer" />
         <button className="btn btn-sm" disabled={busy || !adapters.length} onClick={() => {
           setDraft(newDraft(adapters[0].id)); setEditing(false); setNote('');
         }}>＋ 添加供应商</button>
       </div>
-      {providers.map((provider) => (
-        <div key={provider.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border, #ddd)' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <strong>{provider.name}</strong>
-            <span>{config?.defaults[channel] === provider.id ? '默认' : '可选'}</span>
-            <span className="spacer" />
-            <button className="btn btn-sm" disabled={busy} onClick={() => {
-              setDraft({ ...provider, settings: { ...provider.settings } }); setEditing(true); setNote('');
-            }}>编辑</button>
-            <button className="btn btn-sm" disabled={busy} onClick={() => void probe(provider.id)}>连接探活</button>
-            {config?.defaults[channel] !== provider.id && <>
-              <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => saveMediaProvider(provider, [channel]))}>设为默认</button>
-              <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => deleteMediaProvider(provider.id))}>删除</button>
-            </>}
-          </div>
-          <div className="foot-note">{adapters.find((a) => a.id === provider.adapter)?.name} · {String(provider.settings.model || '')}</div>
-          {Object.entries(provider.settings).filter(([key]) => key.endsWith('_url')).map(([key, val]) => (
-            <div className="foot-note" key={key}>{adapters.find((a) => a.id === provider.adapter)?.fields.find((f) => f.key === key)?.label || key}：{String(val)}</div>
-          ))}
-          {probes[provider.id] && <div className="foot-note">{probes[provider.id]}</div>}
+      <div className="board media-provider-board">
+        <div className="prow head">
+          <span>顺序</span><span>供应商</span><span>类型</span><span>模型</span>
+          <span>Base URL</span><span>API Key</span><span>角色</span><span>连接状态</span><span>操作</span>
         </div>
-      ))}
+        {builtInRows.map((row, index) => <div className="prow" key={`builtin-${index}`}>
+          <span className="step ghost">{row.order || '—'}</span>
+          <span className="pname">{row.name}<small>{row.sub}</small></span>
+          <span>{row.type}</span><span className="cell-text">{row.model || '—'}</span>
+          <span className="cell-text">{row.baseUrl || '—'}</span><span>{row.keyMasked || '—'}</span>
+          <span className="tag main">优先</span><span>{row.result || '—'}</span><span />
+        </div>)}
+        {providers.map((provider, index) => {
+          const isDefault = config?.defaults[channel] === provider.id;
+          const adapter = adapters.find((a) => a.id === provider.adapter);
+          const urls = Object.entries(provider.settings).filter(([key]) => key.endsWith('_url'));
+          return <div className="prow" key={provider.id}>
+            <span className="step">{index + 1}</span>
+            <span className="pname">{provider.name}</span>
+            <span className="cell-text" title={adapter?.name}>{adapter?.name || provider.adapter}</span>
+            <span className="cell-text" title={String(provider.settings.model || '')}>{String(provider.settings.model || '—')}</span>
+            <span className="cell-text">{urls.map(([key, value]) => <div key={key} title={String(value)}>{String(value)}</div>)}</span>
+            <span className="cell-text" title={String(provider.settings.api_key_env || '无需鉴权')}>
+              {provider.settings.api_key_env ? '环境凭证' : '无需'}</span>
+            <button className={`tag ${isDefault ? 'main' : 'backup'}`} disabled={busy || isDefault}
+              title={isDefault ? '没有现成字幕时使用' : '设为默认转写供应商'}
+              onClick={() => void act(() => saveMediaProvider(provider, [channel]))}>{isDefault ? '默认' : '可选'}</button>
+            <span className="cell-text" title={probes[provider.id] || '尚未探活'}>{probes[provider.id] || '尚未探活'}</span>
+            <span className="media-provider-actions">
+              <button className="btn btn-sm" disabled={busy} onClick={() => {
+                setDraft({ ...provider, settings: { ...provider.settings } }); setEditing(true); setNote('');
+              }}>编辑</button>
+              <button className="btn btn-sm" disabled={busy} onClick={() => void probe(provider.id)}>探活</button>
+              {!isDefault && <button className="btn btn-sm" disabled={busy}
+                onClick={() => void act(() => deleteMediaProvider(provider.id))}>删除</button>}
+            </span>
+          </div>;
+        })}
+      </div>
       {config && !providers.length && <div className="foot-note">尚未配置此通道的自定义供应商。</div>}
       {draft && <form onSubmit={(e) => { e.preventDefault(); void act(() => saveMediaProvider(draft)); }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) minmax(160px, 2fr)', gap: 10, padding: '16px 0' }}>
-          <label htmlFor="media-adapter">适配器</label>
+          <label htmlFor="media-adapter">接口类型</label>
           <select id="media-adapter" value={draft.adapter} disabled={editing || busy}
             onChange={(e) => setDraft(newDraft(e.target.value))}>
             {adapters.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}

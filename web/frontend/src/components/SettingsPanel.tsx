@@ -688,8 +688,7 @@ export default function SettingsPanel({ onClose }: Props) {
                     <div className="panel-top">
                       <span className="desc">已有字幕优先 → 默认转写供应商；失败明确报错</span>
                     </div>
-                    {renderBoard(transRows.filter((r) => !r.slot))}
-                    <MediaProviders channel="transcribe" />
+                    <MediaProviders channel="transcribe" builtInRows={transRows.filter((r) => !r.slot)} />
                     <div className="foot-note">每行单独保存，下一次任务生效。连接探活不代表识别质量；不自动下载或回退 Whisper。Whisper 仅可通过命令行手动选择。</div>
                   </section>
                 )}
@@ -869,4 +868,3 @@ function FixedDropdown({ anchor, models, current, emptyHint, onPull, pulling, on
     document.body,
   );
 }
-

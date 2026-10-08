@@ -152,12 +152,55 @@ def test_native_transport_preserves_unicode_and_file(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
     try:
         with client({"transport": "curl"}) as http, audio(tmp_path, 1).open("rb") as file:
-            result = http.post(f"http://127.0.0.1:{server.server_port}/test", data={"text": "中文\n下一句"},
+            result = http.post(f"http://127.0.0.1:{server.server_port}/test", data={"text": "中文\n下一句",
+                               "timestamp_granularities[]": ["word", "segment"]},
                                files={"file": ("audio.wav", file, "audio/wav")})
         assert result.json()["ok"] is True
         assert "中文\n下一句".encode() in seen[0] and b"RIFF" in seen[0]
+        assert seen[0].count(b'name="timestamp_granularities[]"') == 2
+        assert b'\r\n\r\nword\r\n' in seen[0] and b'\r\n\r\nsegment\r\n' in seen[0]
     finally:
         server.shutdown(); server.server_close(); thread.join(5)
+
+
+def test_gateway_word_request_uploads_whole_audio_and_preserves_alignment(tmp_path, monkeypatch):
+    from easel_media_adapters import openai
+    rt = MediaRuntime(tmp_path / "providers.json")
+    rt.save_provider({"id": "gateway", "name": "组合转写", "adapter": "openai-transcription",
+                      "settings": {"base_url": "http://api.test/v1", "model": "qwen3-asr-aligned",
+                                   "timestamp_granularity": "word+segment", "timeout_seconds": 1900}}, ["transcribe"])
+    calls = []
+    payload = {"text": "Hello world.", "timestamp_source": "forced_alignment", "warnings": ["服务端诊断"],
+               "words": [{"word": "Hello", "start": 0.1, "end": 0.5},
+                         {"word": "world", "start": 309, "end": 309.9}]}
+    def handler(request):
+        calls.append(request)
+        body = request.read()
+        assert body.count(b'name="timestamp_granularities[]"') == 2
+        assert b'\r\n\r\nword\r\n' in body and b'\r\n\r\nsegment\r\n' in body
+        assert b'qwen3-asr-aligned' in body and b'RIFF' in body
+        return httpx.Response(200, json=payload)
+    monkeypatch.setattr(openai, "client", lambda settings: httpx.Client(transport=httpx.MockTransport(handler)))
+    result = rt.submit("transcribe", "transcribe", TranscriptionRequest(audio(tmp_path, 310)))
+    assert len(calls) == 1  # Server owns chunking; the client submits the entire file once.
+    assert result["duration"] == 310 and result["words"][-1]["end"] == 309.9
+    assert result["timestamp_source"] == "forced_alignment"
+    assert result["warnings"] == ["服务端诊断"]
+    payload.pop("words")
+    payload["segments"] = [{"text": "Hello world.", "start": 0, "end": 1}]
+    with pytest.raises(MediaError, match="未返回 words"):
+        rt.submit("transcribe", "transcribe", TranscriptionRequest(tmp_path / "audio.wav"))
+
+
+def test_openai_adapter_rejects_explicit_estimated_timestamps(tmp_path, monkeypatch):
+    from easel_media_adapters import openai
+    rt = MediaRuntime(tmp_path / "providers.json")
+    rt.save_provider({"id": "estimated", "name": "估算服务", "adapter": "openai-transcription",
+                      "settings": {"base_url": "http://api.test/v1", "model": "asr"}}, ["transcribe"])
+    monkeypatch.setattr(openai, "client", lambda settings: httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"approx_timeline": True}))))
+    with pytest.raises(MediaError, match="估算时间轴"):
+        rt.submit("transcribe", "transcribe", TranscriptionRequest(audio(tmp_path, 2)))
 
 
 @pytest.mark.parametrize("words", [[], [{"text": "x", "start": 2, "end": 1}],

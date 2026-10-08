@@ -5,8 +5,8 @@
 ## 已实现的范围
 
 - 独立安装包 `integrations/media-adapters/`：实例配置、能力描述、可信安装包注册、输入验证和执行分发。
-- 两个转写适配器：`qwen-asr-aligner`（ASR + ForcedAligner 组合）、`openai-transcription`（带真实时间戳的兼容接口）。
-- 设置页“语音转写”可以添加、编辑、探活、选择默认供应商，以及删除非默认实例。
+- 两个转写适配器：`openai-transcription`（单地址、真实时间戳的兼容接口，当前内网默认），`qwen-asr-aligner`（保留的两个地址直连方式）。
+- 设置页“语音转写”在同一张原供应商表中显示“自带字幕”和自定义实例，可以添加、编辑、探活、选择默认转写供应商，以及删除非默认实例；已有字幕仍优先。
 - 同一份供应商配置同时用于共享字幕脚本和视频流水线；已有转录稿/字幕优先，失败不自动切换或下载 Whisper。
 - `MediaProviders.tsx` 根据适配器描述生成配置字段，可以复用于其他媒体通道。
 
@@ -43,13 +43,12 @@
   "providers": [{
     "id": "internal-qwen-asr",
     "name": "内网 Qwen ASR + 对齐",
-    "adapter": "qwen-asr-aligner",
+    "adapter": "openai-transcription",
     "settings": {
-      "asr_url": "http://ASR_HOST:8080",
-      "aligner_url": "http://ALIGNER_HOST:8081",
-      "model": "qwen3-asr",
-      "chunk_seconds": 30,
-      "timeout_seconds": 180,
+      "base_url": "http://GATEWAY_HOST:18082/v1",
+      "model": "qwen3-asr-aligned",
+      "timestamp_granularity": "word+segment",
+      "timeout_seconds": 1900,
       "use_proxy": false,
       "transport": "httpx"
     }
@@ -58,13 +57,30 @@
 }
 ```
 
-地址是迁移占位值；实际用户地址写在用户目录配置中，不提交 Git。Qwen 两个地址均为根地址，不含 `/v1`。OpenAI 兼容适配器的 `base_url` 通常包含 `/v1`。数字/布尔字段由适配器描述校验，不要把 false 写成字符串。
+地址是迁移占位值；实际用户地址写在用户目录配置中，不提交 Git。当前组合服务只填一个含 `/v1` 的 Base URL，不在 Easel 中填 ASR 和对齐两个地址。数字/布尔字段由适配器描述校验，不要把 false 写成字符串。
 
 设置页：模型配置 → 语音转写 → 添加供应商 → 选择适配器 → 填写实例 ID/名称及字段 → 保存并设为默认。每行独立保存，下一次任务读取新配置，不要求重启 Gateway。默认实例删除前先将另一个实例设为默认。
 
 配置文件采用原子替换，权限 0600。它只存凭证环境变量的名称，不存密钥。无鉴权 Qwen 服务不需要伪造 Key；OpenAI 兼容服务可以填写 `api_key_env`，例如 `EASEL_MEDIA_TRANSCRIPTION_KEY`，由进程环境提供真实值。网页只允许专用 `EASEL_MEDIA_*` 凭证引用，不能转发任意既有进程秘密。把 Key 写入 `.env` 并不保证每种 CLI 启动方式都会读取，应在启动环境明确导出并重启需要使用它的进程。
 
 内网访问是对配置实例的显式授权，不会放开旧聊天自测的 SSRF 策略。仅安装管理员信任的适配包，不从网页导入代码；HTTP 请求不跟随跳转，避免凭证被转发到另一个地址。
+
+### 单地址组合服务（当前推荐）
+
+独立的 Qwen 转写组合服务负责调用原 ASR 和 ForcedAligner。Easel 使用通用 `openai-transcription`，不新增 Qwen 专属网关适配器：
+
+- 模型 `qwen3-asr-aligned`；POST `/v1/audio/transcriptions`，multipart `file/model/language/response_format=verbose_json`。
+- “时间戳粒度”选择 `word+segment`，实际发送两个同名 `timestamp_granularities[]` 字段。兼容适配器缺省是 `segment`；只有支持词时间戳的服务才选择 word。明确请求 word 却没返回 words 时失败，不将段级结果伪装成词级成功。
+- Easel 仅提取/标准化完整音轨并上传一次，不再客户端切片或直接访问两个模型端点。服务端负责约30秒静音附近切分、串行 ASR/对齐及全局偏移合并；客户端验证真实时间戳，再按字幕行长度聚合。
+- 保留服务端 `timestamp_source=forced_alignment` 和 warnings；若服务明确标记为估算时间轴，拒绝作为真实时间戳。模型未提供的置信度不伪造。
+- 服务同步等待上限当前1860秒，实例超时设置1900秒（大于服务等待上限）；旧实例若仍600秒需在设置页更新。不得在超时或未知提交状态后自动重交推理。
+- GET `/v1/models` 仅探测接口连接/鉴权；服务端 `/health` 检查上游及队列，两者都不代表识别质量已经验证。
+
+服务端启动/部署由独立项目维护，不随 Easel 升级重启或重新加载模型。其固定 wheel 仍来自 Easel 提交 `7cf2a23` /适配包0.1.0；本轮客户端0.1.1增加请求粒度等能力，不要求远端换 wheel。远端维护说明仍标记试验进程、尚未安装正式系统服务，不能把端点可用写成已完成 systemd 正式部署。
+
+### 保留两个地址直连的可选方式
+
+`qwen-asr-aligner` 仍可显式选择，字段为 `asr_url`、`aligner_url`（均不含 `/v1`）、`model=qwen3-asr`、`chunk_seconds=30`、`timeout_seconds=180`，以及通用 transport/use_proxy。此方式由客户端执行分片和对齐，不是当前默认网关方式。现有默认实例已原地切换为单地址，实例 ID 保持不变，不残留第二条默认或备选实例。切换前个人配置备份为同目录 `media-providers.before-transcription-gateway.json`，不提交 Git；回退需显式恢复配置而非自动 fallback。
 
 ### macOS HTTP 传输
 
@@ -95,7 +111,7 @@
 
 视频流水线保留 `--transcript` 的 JSON/SRT/VTT 优先规则。无现成稿时调用 `python -m easel.media transcribe`；使用安装了 Easel 和适配包的 Python 环境。仅安装 faster-whisper 不表示其模型已经下载。
 
-### Qwen 的切片与对齐
+### Qwen 直连适配器的切片与对齐（可选旧方式）
 
 1. FFmpeg 将音/视频转换为 16kHz、单声道、PCM WAV；不改原文件。
 2. 默认目标 30 秒（可配置），优先选目标前后约 10 秒内的静音中点；无静音按目标切。片段无重叠、无空缺，最大不超过 120 秒，低于对齐服务的 300 秒上限。
@@ -113,7 +129,7 @@
 
 - 以前的 SiliconFlow 配置不会自动变成新默认实例。可以在设置页添加 OpenAI 兼容转写实例，使用真实支持的模型与地址，并配置专用凭证引用；旧 `SILICONFLOW_*` 保留，不会擅自删除或覆盖。
 - 默认供应商缺失会明确报错，不再因缺 Key 自动进入 Whisper。已有可信字幕照常优先。
-- 当前 OpenAI 兼容转写要求真实 words 或 segments；只返回纯文本的服务会失败，不再生成比例估算时间轴。
+- 当前 OpenAI 兼容转写要求真实 words 或 segments；word 模式必须有真实 words，只返回纯文本的服务会失败，不再生成比例估算时间轴。
 - 旧 SDK 的 `transcribe.py` / `transcribe_api.py` 文件仍保留用于历史和手动调用，正常流水线不再经过它们。
 - 切换机器时复制用户配置，调整地址/传输并提供必要凭证；不要把配置或密钥复制进 Git。
 
@@ -121,7 +137,7 @@
 
 ### 同协议新增实例
 
-直接在设置页添加另一行，无需改代码。例如两个不同地址的 Qwen 组合服务，或另一家真正兼容的转写 API。
+直接在设置页添加另一行，无需改代码。例如另一个单地址 Qwen 组合服务，或另一家真正兼容的转写 API。单地址实例使用 `openai-transcription`，不需要新写一个适配器。
 
 ### 新协议新增适配器
 
@@ -203,3 +219,13 @@ cd web/frontend && npm run build
 - 前一轮约 60 秒切片的末段约 69 秒，ASR 返回 30,466 字符重复文本，对齐服务因超过 16,000 字符限制返回 422。不是音频超过 5 分钟；已加生成预算、文本异常/截断拒绝，并将本机默认目标设为 30 秒。没有修改服务器或以 HTTP 200 当作完整识别成功。
 - 浏览器实际检查：默认实例行、编辑字段、添加表单、连接探活均正常，无页面脚本错误；localhost 和 LAN 页面 HTTP 200。
 - 本地验证产物在 `/tmp/easel-media-validation/`，未提交 Git；用户实例仍在用户目录配置文件。
+
+### 单地址组合服务接入验证（2026-10-08）
+
+- 本地默认实例使用 `openai-transcription` / `qwen3-asr-aligned` / `word+segment`，只配置组合服务 Base URL；适配包客户端版本0.1.1。
+- 根目录测试407 passed / 3 skipped，前端 tsc + Vite 构建通过，pip check 无冲突。回归覆盖完整310秒音频只上传一次、重复 multipart 粒度字段、服务端警告保留、缺词时间戳及估算结果拒绝。
+- 经 Easel 统一入口真实中文：4.204秒，13个对齐单位，识别“甚至出现交易几乎停滞的情况。”；英文：15.051秒，37个单位。
+- 经 Easel 单地址接口真实310秒重复英文：763个单位、207条字幕，末词结束310秒，约16.9秒；零时长单位保留并诊断。这是容量与偏移验证，不是一般长音频质量评测。
+- 共享字幕脚本通过默认组合接口生成正确SRT；已有字幕优先回归通过。
+- 浏览器验证同一表格显示“自带字幕”及默认内网实例，编辑只有一个Base URL、粒度与1900秒超时；添加表单、连接探活正常，无页面脚本错误。Web重启后localhost和LAN可访问。
+- 验证产物 `/tmp/easel-gateway-validation/` 为本地临时文件，不提交；未改动远端两个模型服务、网关部署方式或共享OpenClaw。

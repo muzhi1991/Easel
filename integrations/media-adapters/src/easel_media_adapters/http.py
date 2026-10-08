@@ -58,7 +58,8 @@ class CurlClient:
             for key, val in self.headers.items():
                 lines.append(f"header = {json.dumps(key + ': ' + val)}")
             for key, val in (data or {}).items():
-                lines.append(f"form-string = {json.dumps(key + '=' + str(val), ensure_ascii=False)}")
+                for item in val if isinstance(val, (list, tuple)) else [val]:
+                    lines.append(f"form-string = {json.dumps(key + '=' + str(item), ensure_ascii=False)}")
             for key, (filename, handle, content_type) in (files or {}).items():
                 # Private numeric filenames avoid curl form syntax in caller-controlled paths.
                 part = Path(tmp) / f"upload-{len(lines)}"
