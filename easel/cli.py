@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -146,6 +147,18 @@ def cmd_web(args) -> int:
     """启动 Web 工作台（FastAPI + React），默认 http://localhost:7860。"""
     port = getattr(args, "port", 7860)
     env = _proxy_env()
+    # Dedicated media credentials only; inherited environment takes precedence.
+    # Do not source .env as shell code or export unrelated provider secrets.
+    env_file = PROJECT_ROOT / ".env"
+    if env_file.is_file():
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip().removeprefix("export ").strip()
+            key, separator, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if separator and re.fullmatch(r"EASEL_MEDIA_[A-Za-z0-9_]+", key):
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                env.setdefault(key, value)
     env["EASEL_PORT"] = str(port)
     script = PROJECT_ROOT / "web" / "app.py"
     if not script.is_file():

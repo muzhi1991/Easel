@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""ai_music.py — AI 音乐 / BGM 生成的可插拔客户端（纯标准库，无第三方依赖）。
+"""ai_music.py — AI 音乐 / BGM 生成的可插拔客户端（媒体实例 + 原有供应商）。
 
 给短视频 / 社媒内容生成原创背景音乐（BGM / 配乐 / 纯音乐），支持可插拔 provider：
 
+  - 媒体实例          用户配置中的默认 music 实例，例如 YuE2 歌词歌曲
   - dashscope        阿里云 DashScope（百炼）音频/音乐生成，异步任务 + 轮询
   - suno-compatible  Suno 类第三方 API 的通用格式（异步提交 → 轮询 → 下载）
 
@@ -11,7 +12,7 @@
 配置来自环境变量或 .env 文件（脚本会从当前目录向上查找 .env）：
 
   【通用】
-    MUSIC_PROVIDER       选择 provider（dashscope / suno-compatible），也可用 --provider
+    MUSIC_PROVIDER       旧供应商默认值；--provider 或媒体配置默认实例优先
 
   【dashscope】
     DASHSCOPE_API_KEY    API key（别名：DASHSCOPE_KEY / ALIYUN_API_KEY）
@@ -36,7 +37,7 @@
     ai_music.py generate --provider suno-compatible \\
         --prompt "史诗感电影配乐，弦乐渐强" --lyrics "..." -o outputs/ai-music/track.mp3
 
-说明：每个 provider 的实现"依据公开 API 文档实现，未用真实 key 实测"，
+说明：原有 DashScope / Suno 类 provider 的实现"依据公开 API 文档实现，未用真实 key 实测"，
 模型名 / 端点路径均可通过 env 或 --model 覆盖，以适配各家实际参数。
 """
 from __future__ import annotations
@@ -136,14 +137,20 @@ def require_env(name: str) -> str:
 
 
 def resolve_provider(explicit: str | None) -> str:
-    provider = (explicit or os.environ.get("MUSIC_PROVIDER", "") or "").strip()
+    provider = (explicit or "").strip()
     if not provider:
-        fail(
-            "未指定 provider。请用 --provider 或设置 env MUSIC_PROVIDER。"
-            f"可选：{ '、'.join(PROVIDERS) }。"
-        )
+        try:
+            from easel_media_adapters import MediaRuntime
+        except ImportError:
+            pass  # Legacy providers remain usable without the optional package.
+        else:
+            provider = MediaRuntime().load()["defaults"].get("music", "")
+    provider = provider or os.environ.get("MUSIC_PROVIDER", "").strip()
+    if not provider:
+        fail("未配置默认音乐供应商；请在设置页添加或用 --provider 指定")
     if provider not in PROVIDERS:
-        fail(f"不支持的 provider：{provider}。可选：{ '、'.join(PROVIDERS) }。")
+        from easel.media import music_provider
+        music_provider(provider)
     return provider
 
 
@@ -418,6 +425,14 @@ def cmd_check(args: argparse.Namespace) -> int:
     """离线校验：不发任何请求，只检查所需 env 是否配好。"""
     provider = resolve_provider(args.provider)
     print(f"provider = {provider}")
+    if provider not in PROVIDERS:
+        from easel.media import music_provider
+        instance, _ = music_provider(provider)
+        ref = instance["settings"].get("api_key_env")
+        if ref and not os.environ.get(ref, "").strip():
+            fail(f"缺少凭证环境变量 {ref}")
+        print(f"结果：媒体实例 {instance['name']} 配置完整（离线检查，未验证服务或音质）")
+        return 0
     required = PROVIDER_REQUIRED_ENV[provider]
     all_required_ok = True
     for name, is_required in required:
@@ -446,9 +461,26 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    if not args.prompt or not args.prompt.strip():
-        fail("--prompt 不能为空，请描述音乐的风格 / 情绪 / 乐器。")
     provider = resolve_provider(args.provider)
+    if not args.resume and (not args.prompt or not args.prompt.strip()):
+        fail("--prompt 不能为空，请描述音乐风格")
+    if provider not in PROVIDERS:
+        from easel.media import generate_music
+        lyrics = Path(args.lyrics_file).read_text(encoding="utf-8") if args.lyrics_file else args.lyrics
+        abc = Path(args.abc_file).read_text(encoding="utf-8") if args.abc_file else None
+        result = generate_music(args.prompt or "", Path(args.output), provider=provider,
+                                lyrics=lyrics, abc=abc, cot=args.cot, seed=args.seed,
+                                instrumental=args.instrumental, duration=args.duration,
+                                model=args.model, timeout=args.timeout, resume=args.resume, poll_interval=args.poll_interval)
+        print(f"生成完成：provider={result['provider']}，model={result['model']}，任务={result['id']}")
+        print(f"时长={result['audio']['duration']:.2f}s，音频={result['output']}，乐谱={result.get('score') or '无'}")
+        return 0
+    if args.resume or args.abc_file or args.cot or args.seed is not None:
+        fail("此旧供应商不支持恢复、乐谱、规划或seed参数")
+    if args.lyrics_file:
+        args.lyrics = Path(args.lyrics_file).read_text(encoding="utf-8")
+    args.poll_interval = args.poll_interval if args.poll_interval is not None else 5
+    args.timeout = args.timeout if args.timeout is not None else 300
     generator = PROVIDER_GENERATORS[provider]
     output = generator(args)
     print("生成完成：")
@@ -461,14 +493,14 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai_music.py",
-        description="AI 音乐 / BGM 生成的可插拔客户端（dashscope / suno-compatible），纯标准库。",
+        description="AI 歌曲/音乐生成（媒体实例及原有供应商）。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="cmd", metavar="<子命令>")
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--provider", choices=PROVIDERS,
-                        help="选择 provider；不指定时读 env MUSIC_PROVIDER。")
+    common.add_argument("--provider",
+                        help="供应商ID；默认先读媒体配置，再读 MUSIC_PROVIDER。")
     common.add_argument("--env-file", help="指定 .env；不指定时从当前目录向上查找。")
 
     pc = sub.add_parser("check", parents=[common],
@@ -476,16 +508,22 @@ def build_parser() -> argparse.ArgumentParser:
     pc.set_defaults(func=cmd_check)
 
     pg = sub.add_parser("generate", parents=[common], help="生成音乐 / BGM")
-    pg.add_argument("--prompt", required=True, help="风格 / 情绪 / 乐器描述")
-    pg.add_argument("--lyrics", help="可选歌词（有歌词时不再是纯音乐）")
+    pg.add_argument("--prompt", help="风格 / 情绪 / 乐器描述")
+    lyrics = pg.add_mutually_exclusive_group()
+    lyrics.add_argument("--lyrics", help="歌词（媒体实例可能要求非空）")
+    lyrics.add_argument("--lyrics-file", help="UTF-8歌词文件")
+    pg.add_argument("--abc-file", help="UTF-8 ABC乐谱文件（媒体实例）")
+    pg.add_argument("--cot", choices=["full", "melody", "off"], help="谱面规划（媒体实例）")
+    pg.add_argument("--seed", type=int, help="随机种子（媒体实例）")
+    pg.add_argument("--resume", action="store_true", help="按输出任务记录恢复查询/下载，不提交新任务")
     pg.add_argument("--duration", type=int, help="时长（秒），部分 provider 支持")
     pg.add_argument("--instrumental", action="store_true",
                     help="纯音乐（无人声 BGM）")
     pg.add_argument("--model", help="覆盖模型名（默认读 env / 内置默认）")
     pg.add_argument("-o", "--output", required=True,
                     help="输出音频路径（无扩展名时按返回类型补 .mp3）")
-    pg.add_argument("--poll-interval", type=int, default=5, help="轮询间隔秒，默认 5")
-    pg.add_argument("--timeout", type=int, default=300, help="轮询超时秒，默认 300")
+    pg.add_argument("--poll-interval", type=int, help="查询间隔秒；媒体实例读配置，旧供应商默认5")
+    pg.add_argument("--timeout", type=int, help="等待超时秒；媒体实例读配置，旧供应商默认300")
     pg.set_defaults(func=cmd_generate)
 
     return parser
@@ -501,7 +539,10 @@ def main(argv: list[str] | None = None) -> int:
         args.output = str(validate_output_path(args.output))
     env_file = Path(args.env_file) if getattr(args, "env_file", None) else find_default_env_file()
     load_env_file(env_file)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (RuntimeError, ValueError, OSError) as exc:
+        fail(str(exc))
 
 
 if __name__ == "__main__":

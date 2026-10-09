@@ -4,6 +4,8 @@
 
 ## 已实现的范围
 
+- YuE2 歌词歌曲：`MusicRequest`、异步作业、原音乐列表配置、任务恢复与 FLAC/ABC/转码输出。
+- Qwen3-TTS 配音：独立 `openai-speech` 适配器与原配音列表配置。
 - RapidOCR 图片文字识别：独立适配器、共享 CLI、对话技能及“文字识别”供应商通道。
 - 独立安装包 `integrations/media-adapters/`：实例配置、能力描述、可信安装包注册、输入验证和执行分发。
 - H3视频适配器：同一个 `h3-video` 对应 FL2VA/Ref2VA 两个实例，支持关键帧与多模态参考、任务恢复及原生内容下载。
@@ -12,7 +14,7 @@
 - 同一份供应商配置同时用于共享字幕脚本和视频流水线；已有转录稿/字幕优先，失败不自动切换或下载 Whisper。
 - `MediaProviders.tsx` 根据适配器描述生成配置字段，可以复用于其他媒体通道。
 
-统一适配层已接通转写、H3 视频和 OCR 执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，原有供应商执行分发表仍保留。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3 已通过原生 SGLang 接入，ComfyUI 执行入口尚未迁移到适配包。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
+统一适配层已接通转写、H3 视频、OCR、Qwen3-TTS 和 YuE2 音乐执行入口。各频道原有供应商仍然照旧运行，原有供应商执行分发表仍保留。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3 已通过原生 SGLang 接入，ComfyUI 执行入口尚未迁移到适配包。未来频道或供应商需确认执行入口已接通统一请求，服务特有改动才可留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
 
 ## 安装
 
@@ -63,7 +65,7 @@
 
 设置页：模型配置 → 语音转写 → 添加供应商 → 选择适配器 → 填写实例 ID/名称及字段 → 保存并设为默认。每行独立保存，下一次任务读取新配置，不要求重启 Gateway。默认实例删除前先将另一个实例设为默认。
 
-配置文件采用原子替换，权限 0600。它只存凭证环境变量的名称，不存密钥。无鉴权 Qwen 服务不需要伪造 Key；OpenAI 兼容服务可以填写 `api_key_env`，例如 `EASEL_MEDIA_TRANSCRIPTION_KEY`，由进程环境提供真实值。网页只允许专用 `EASEL_MEDIA_*` 凭证引用，不能转发任意既有进程秘密。把 Key 写入 `.env` 并不保证每种 CLI 启动方式都会读取，应在启动环境明确导出并重启需要使用它的进程。
+配置文件采用原子替换，权限 0600。它只存凭证环境变量的名称，不存密钥。无鉴权 Qwen 服务不需要伪造 Key；OpenAI 兼容服务可以填写 `api_key_env`，例如 `EASEL_MEDIA_TRANSCRIPTION_KEY`，由进程环境提供真实值。网页只允许专用 `EASEL_MEDIA_*` 凭证引用，不能转发任意既有进程秘密。`easel web` 启动时读取项目 `.env` 中的 `EASEL_MEDIA_*` 字段，继承的进程变量优先；音乐脚本也读取项目 `.env`。独立适配包直接调用不读取 `.env`，需显式导出凭证。更换 Web 使用的凭证后重启 Web；不必因此重启 Gateway。
 
 内网访问是对配置实例的显式授权，不会放开旧聊天自测的 SSRF 策略。仅安装管理员信任的适配包，不从网页导入代码；HTTP 请求不跟随跳转，避免凭证被转发到另一个地址。
 
@@ -444,3 +446,25 @@ SRT 是合成段真实帧数/采样率累积的句级字幕；不运行 ASR、�
 新真实 Agent session `0956e0cb-2a85-46e8-824a-1d16ec7efab7`，status=ok、100.76秒（完整Agent耗时，不是模型生成速度），输出 `outputs/千问对话配音验收/agent.mp3` / `agent.srt` / `agent.tts.json`；provider=internal-qwen-tts、model=qwen3-tts、voice=vivian、音频5.2秒、两条字幕覆盖0–5.2秒。独立Qwen ASR回读“欢迎收听内网配音。今天的验证码是五九七四。”正确；对齐报告一单位零时长，不影响此处合成段字幕，未据此宣传逐字精度。CLI结果 `/tmp/easel-qwen-tts-agent.json`；真实素材及实例状态不进Git。
 
 Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fish为备/手动可选；点击Qwen探活显示连接正常。这里“备”不意味着自动降级链。localhost/LAN均200，pip check通过。当前音色字段可编辑为服务返回的名称，`tts.py voices` 可列出服务音色。
+
+
+## YuE2 歌词歌曲（适配包 0.5.0）
+
+设置页“模型配置 → 音乐”原供应商表内添加 `yue2-music`，名称如“内网 YuE2”，设为默认。服务根地址不含 `/v1`，例如 `http://MUSIC_HOST:18194`；模型填 `YuE2-3B`，凭证引用 `EASEL_MEDIA_MUSIC_KEY`，实际 Bearer Key 放本机 `.env` 或启动环境。等待超时默认3600秒（包含排队），查询间隔5秒。迁移时复制用户配置中的实例和 defaults.music、单独迁移凭证，再安装适配包、重启 Web、同步本次 ai-music 技能；不会部署模型或修改远程路由。
+
+调用路径是对话 `ai-music` 技能 → `skills/shared/scripts/ai_music.py` → `easel.media.generate_music` → 通用 `MusicRequest` → 独立 `yue2.py`。CLI 与 Web 的通用接线已经完成；后续音乐服务注册自己的适配器和描述即可复用它们，不应把特有协议写进 Web 或技能脚本。显式 `--provider` 优先，其次用户配置 defaults.music，最后旧 MUSIC_PROVIDER。选择原内置音乐供应商会清除媒体音乐默认值，不影响转写/配音等默认值。失败不自动切至付费服务。
+
+首期仅接歌词歌曲及可选 ABC 乐谱；不是配音，不支持 `--instrumental`、请求固定秒数、参考音频上传或翻唱。风格1–2000字符，歌词1–16000字符，ABC最长64000字符，cot=full/melody/off（off 不接 ABC）。界面模型名记录部署约定，不能仅凭探活确认模型身份。当前内网部署返回 backend=torch，不代表启用了 vLLM Turbo 加速。
+
+```bash
+.venv/bin/python skills/shared/scripts/ai_music.py check
+.venv/bin/python skills/shared/scripts/ai_music.py generate --prompt "中文温柔钢琴流行歌曲" --lyrics-file outputs/my-song/lyrics.txt -o outputs/my-song/song.mp3
+# 已知作业继续查询/下载；不再提交推理，不需要重复歌词：
+.venv/bin/python skills/shared/scripts/ai_music.py generate --resume -o outputs/my-song/song.mp3
+```
+
+生成前先保存 `.job.json` 与 Idempotency-Key，POST `/v1/jobs` 后立即保存 job ID；GET 轮询后从同一服务固定地址下载，不跟随返回的任意 URL。服务 succeeded 且两个 truncated 标志明确 false 才交付；truncated/failed/cancelled 均失败。提交网络中断而未拿到 ID 时保留记录、停止重投，需用记录的 Idempotency-Key 在服务日志核查，不得因重复运行自动产生新收费或算力作业。已拿到 ID 的超时用同一输出路径 `--resume`，远端需仍保留该作业（当前7天或20GiB清理）。恢复要求实例、地址和输出路径一致。没有接入取消 CLI，不用删除本地记录代替远端取消。
+
+保留原生 FLAC、ABC（cot!=off）、`.music.json` 元数据、`.job.json` 恢复记录；指定 MP3/WAV/M4A 时额外用 FFmpeg 转码。下载有大小限制，检查 FLAC 标识、真实音轨、完整解码及服务报告时长，再检查转码结果；不能把 HTTP200 或下载文件存在作为歌曲成功。
+
+本轮隔离测试覆盖原生下载、转码、截断、错误、凭证、恢复和切换默认值；真实服务 seed=2026100920 作业 d9fdd4bc3d2a432f9541e15835d877c0 生成42.60秒48kHz双声道中文歌词歌曲，调用约20.69秒。音频技术校验通过不等同于人工音质评价。

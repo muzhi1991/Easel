@@ -1740,7 +1740,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
         if not _mupd:
             raise HTTPException(400, "没有可保存的改动（key 留空表示不改）")
         _write_env_direct(_mupd)
-        if _gid0 in ("video", "voice") and _primary0:
+        if _gid0 in ("video", "voice", "music") and _primary0:
             try:
                 rt = _media_runtime()
             except RuntimeError:

@@ -363,7 +363,7 @@ export default function SettingsPanel({ onClose }: Props) {
 
   useEffect(() => {
     const refresh = () => { void fetchModelChannels().then((d) => {
-      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [], speech: d.channels.speech?.rows || [] }));
+      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [], speech: d.channels.speech?.rows || [], music: d.channels.music?.rows || [] }));
     }); };
     window.addEventListener('easel-media-config', refresh);
     return () => window.removeEventListener('easel-media-config', refresh);
@@ -371,6 +371,7 @@ export default function SettingsPanel({ onClose }: Props) {
 
   const [videoAdapterConfigured, setVideoAdapterConfigured] = useState(false);
   const [speechAdapterConfigured, setSpeechAdapterConfigured] = useState(false);
+  const [musicAdapterConfigured, setMusicAdapterConfigured] = useState(false);
   const mediaOk = (ch: string) => (mediaRows[ch] || []).some((r) => r.result === '已配置');
 
   const cacheKeyFor = (r: ModelRow) => {
@@ -760,12 +761,14 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'music' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${mediaOk('music') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('music') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用；「主/备」= 默认</span>
+                      <span className={`pill ${(mediaOk('music') || musicAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('music') || musicAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
+                      <span className="desc">选择默认音乐服务；歌词歌曲与纯音乐能力因服务而异</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.music || [], { onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true })}
-                    <MediaProviders channel="music" />
+                    <MediaProviders channel="music" onConfigured={setMusicAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.music || [], {
+                      onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true,
+                    }, extra)} />
+                    <div className="foot-note">默认媒体供应商优先；失败不会自动换服务。YuE2 首期支持歌词歌曲，不支持指定生成秒数或纯 BGM。</div>
                   </section>
                 )}
 
