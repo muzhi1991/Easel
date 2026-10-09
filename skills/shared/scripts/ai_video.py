@@ -196,7 +196,13 @@ def _save_probe_cache(provider: str, model: str | None, entry: dict) -> None:
 
 def provider_capabilities(provider: str, model: str | None = None) -> dict[str, Any]:
     """返回统一能力协议；VIDEO_CAPABILITIES_JSON 可覆盖任意新 provider/model 网关差异。"""
-    cap = {"provider": provider, "model": model, **PROVIDER_CAPABILITIES[provider]}
+    if provider not in PROVIDERS:
+        from easel.media import video_provider
+        _, capabilities = video_provider(provider)
+        cap = {"provider": provider, **capabilities}
+        model = model or capabilities.get("model")
+    else:
+        cap = {"provider": provider, "model": model, **PROVIDER_CAPABILITIES[provider]}
     # 优先级：内置默认 < 探针缓存 < VIDEO_CAPABILITIES_JSON（env 覆盖最高＝「配置可覆盖」）
     cache = _load_probe_cache()
     for key in (provider, f"{provider}:{model or ''}"):
@@ -276,12 +282,28 @@ def _put_audio(payload: dict[str, Any], params: dict[str, Any] | None,
 
 
 def resolve_provider(explicit: str | None) -> str:
-    provider = (explicit or os.environ.get("VIDEO_PROVIDER", "") or "").strip()
+    provider = (explicit or "").strip()
+    if not provider:
+        try:
+            from easel.media import runtime
+            rt = runtime()
+        except RuntimeError:
+            rt = None
+        if rt is not None:
+            try:
+                provider = rt.load()["defaults"].get("video", "")
+            except RuntimeError as exc:
+                fail(str(exc))
+    provider = provider or os.environ.get("VIDEO_PROVIDER", "").strip()
     if not provider:
         fail("未指定 provider。请用 --provider 或设置 env VIDEO_PROVIDER。"
              f"可选：{ '、'.join(PROVIDERS) }。")
     if provider not in PROVIDERS:
-        fail(f"不支持的 provider：{provider}。可选：{ '、'.join(PROVIDERS) }。")
+        try:
+            from easel.media import video_provider
+            video_provider(provider)
+        except (RuntimeError, ValueError) as exc:
+            fail(str(exc))
     return provider
 
 
@@ -289,6 +311,10 @@ def resolve_model(provider: str, explicit: str | None = None, *, image: bool = F
     """Resolve the effective model exactly as the provider adapter will use it."""
     if explicit and explicit.strip():
         return explicit.strip()
+    if provider not in PROVIDERS:
+        from easel.media import video_provider
+        instance, capabilities = video_provider(provider)
+        return capabilities.get("model") or instance["settings"].get("model", "")
     env_names = {
         "dashscope": ("DASHSCOPE_VIDEO_MODEL",),
         "ark": ("ARK_MODEL",),
@@ -663,6 +689,11 @@ def _mask(value: str) -> str:
 def cmd_check(args: argparse.Namespace) -> int:
     provider = resolve_provider(args.provider)
     print(f"provider = {provider}")
+    if provider not in PROVIDERS:
+        from easel.media import video_provider
+        instance, capabilities = video_provider(provider)
+        print(json.dumps({"instance": instance, "capabilities": capabilities}, ensure_ascii=False, indent=2))
+        return 0
     ok = True
     for name, required in PROVIDER_REQUIRED_ENV[provider]:
         value = env_lookup(name)
@@ -759,7 +790,7 @@ def cmd_probe_dialogue(args: argparse.Namespace) -> int:
             fail("--mode i2v 需要 --image 提供首帧图")
         image = gen_args.image
     print(f"[probe] 生成测试片段：{provider}:{model or '默认'} 说「{text}」…", file=sys.stderr)
-    GENERATORS[provider](gen_args, image)
+    dispatch_video(gen_args, image)
 
     asr = Path(__file__).resolve().parent / "asr.py"
     asr_out = outdir / "probe_asr.json"
@@ -781,10 +812,38 @@ def cmd_probe_dialogue(args: argparse.Namespace) -> int:
                               "clip": str(clip), "asr_model": args.asr_model or "base"})
 
 
+def dispatch_video(args: argparse.Namespace, image: str | None) -> Path:
+    provider = resolve_provider(args.provider)
+    extra = any(getattr(args, key, None) for key in
+                ("last_frame", "ref_image", "ref_video", "ref_audio", "resume"))
+    if provider in PROVIDERS:
+        if extra:
+            fail("此内置供应商尚未支持首尾帧、参考素材或恢复任务，请选择媒体适配器实例")
+        if getattr(args, "seed", None) is not None:
+            fail("此内置供应商尚未接通 --seed，不能静默忽略")
+        args.timeout = args.timeout if args.timeout is not None else 900
+        return GENERATORS[provider](args, image)
+    from easel.media import generate_video
+    def paths(key):
+        return tuple(Path(p) for p in (getattr(args, key, None) or []))
+    try:
+        result = generate_video(args.prompt or "", Path(args.output), provider=provider,
+            first_frame=Path(image) if image else None,
+            last_frame=Path(args.last_frame) if getattr(args, "last_frame", None) else None,
+            reference_images=paths("ref_image"), reference_videos=paths("ref_video"),
+            reference_audio=paths("ref_audio"), duration=args.duration if args.duration is not None else 5,
+            ratio=args.ratio or "16:9", seed=getattr(args, "seed", None), model=args.model,
+            audio=args.audio, timeout=args.timeout, resume=getattr(args, "resume", False))
+        print(f"任务记录：{args.output}.job.json", file=sys.stderr)
+        return Path(result["output"])
+    except (RuntimeError, ValueError, OSError) as exc:
+        fail(str(exc))
+
+
 def cmd_text2video(args: argparse.Namespace) -> int:
     if not args.prompt or not args.prompt.strip():
         fail("--prompt 不能为空，请描述视频画面 / 镜头 / 风格。")
-    out = GENERATORS[resolve_provider(args.provider)](args, None)
+    out = dispatch_video(args, None)
     print("生成完成：")
     print(out)
     return 0
@@ -793,7 +852,7 @@ def cmd_text2video(args: argparse.Namespace) -> int:
 def cmd_image2video(args: argparse.Namespace) -> int:
     if not args.image:
         fail("--image 不能为空（图生视频/数字人首帧驱动需要输入图）。")
-    out = GENERATORS[resolve_provider(args.provider)](args, args.image)
+    out = dispatch_video(args, args.image)
     print("生成完成：")
     print(out)
     return 0
@@ -811,7 +870,13 @@ def _add_common(p: argparse.ArgumentParser, need_prompt: bool) -> None:
     p.add_argument("-o", "--output", required=True,
                    help="输出视频路径；必须位于 outputs/<人类可读主题>/")
     p.add_argument("--poll-interval", type=int, default=10, help="轮询间隔秒（默认 10）")
-    p.add_argument("--timeout", type=int, default=900, help="任务总超时秒（默认 900）")
+    p.add_argument("--timeout", type=int, help="任务等待超时秒（内置默认900；适配器使用实例配置）")
+    p.add_argument("--last-frame", help="尾帧本地图片（适配器实例）")
+    p.add_argument("--ref-image", action="append", help="参考图片本地路径，可重复")
+    p.add_argument("--ref-video", action="append", help="参考视频本地路径，可重复")
+    p.add_argument("--ref-audio", action="append", help="参考音频本地路径，可重复")
+    p.add_argument("--seed", type=int, help="随机种子（适配器实例）")
+    p.add_argument("--resume", action="store_true", help="按输出位置的任务记录继续查询和下载，不重新提交")
 
 
 def main() -> int:
@@ -824,8 +889,12 @@ def main() -> int:
 
     p2 = sub.add_parser("image2video", help="图生视频 / 数字人首帧驱动")
     _add_common(p2, need_prompt=False)
-    p2.add_argument("--image", required=True, help="输入图片（本地路径或 http URL）")
+    p2.add_argument("--image", "--first-frame", required=True, help="输入图片（本地路径或 http URL）")
     p2.set_defaults(func=cmd_image2video)
+
+    pref = sub.add_parser("reference2video", help="参考素材生视频（媒体适配器实例）")
+    _add_common(pref, need_prompt=True)
+    pref.set_defaults(func=cmd_text2video)
 
     p3 = sub.add_parser("check", help="离线校验 provider 所需 env（不发请求）")
     p3.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")

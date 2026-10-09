@@ -29,6 +29,18 @@ def transcribe(source: Path, *, language: str = "auto", provider: str | None = N
                             TranscriptionRequest(Path(source), language, model, max_line_chars), provider)
 
 
+def video_provider(provider: str | None = None) -> tuple[dict, dict]:
+    instance, adapter = runtime().resolve("video", provider)
+    describe = getattr(adapter, "capabilities", None)
+    return instance, describe(instance) if describe else {}
+
+
+def generate_video(prompt: str, output: Path, *, provider: str | None = None, **options) -> dict:
+    rt = runtime()
+    from easel_media_adapters import VideoRequest
+    return rt.submit("video", "generate_video", VideoRequest(prompt, Path(output), **options), provider)
+
+
 def write_transcript(result: dict, path: Path) -> None:
     """Never leave a partial transcript if recognition/alignment fails."""
     path.parent.mkdir(parents=True, exist_ok=True)

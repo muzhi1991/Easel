@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, SetStateAction, ReactNode } from 'react';
 import EnvBoard from './EnvBoard';
 import MediaProviders from './MediaProviders';
 import type { JobView } from './EnvBoard';
@@ -283,6 +283,7 @@ export default function SettingsPanel({ onClose }: Props) {
     setSavedNote('');
     try {
       const d = await fetchWithRetry(() => saveModelConfig(chan, payload), 3, 20000);
+      window.dispatchEvent(new Event('easel-media-config'));
       setChatRows(d.channels.chat.rows || []);
       setTransRows(d.channels.transcribe.rows || []);
       setMediaRows({
@@ -359,6 +360,15 @@ export default function SettingsPanel({ onClose }: Props) {
   const setMediaPrimary = (ch: string, i: number) =>
     setMediaRows((m) => ({ ...m, [ch]: (m[ch] || []).map((r, j) => ({ ...r, role: j === i ? '主' : '备' })) }));
 
+  useEffect(() => {
+    const refresh = () => { void fetchModelChannels().then((d) => {
+      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [] }));
+    }); };
+    window.addEventListener('easel-media-config', refresh);
+    return () => window.removeEventListener('easel-media-config', refresh);
+  }, []);
+
+  const [videoAdapterConfigured, setVideoAdapterConfigured] = useState(false);
   const mediaOk = (ch: string) => (mediaRows[ch] || []).some((r) => r.result === '已配置');
 
   const cacheKeyFor = (r: ModelRow) => {
@@ -378,6 +388,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const renderBoard = (
     rows: ModelRow[],
     ops?: { onRow?: (i: number, patch: Partial<ModelRow>) => void; onPrimary?: (i: number) => void; onRemove?: (i: number) => void; media?: boolean },
+    additionalRows?: ReactNode,
   ) => (
     modelLoading && rows.length === 0 ? (
       <div className="board"><div className="empty"><span className="spin" /> 正在读取配置…<span className="hint">（后台繁忙时可能稍慢，会自动重试）</span></div></div>
@@ -554,6 +565,7 @@ export default function SettingsPanel({ onClose }: Props) {
             </div>
           );
         })}
+        {additionalRows}
       </div>
     )
   );
@@ -722,13 +734,15 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'video' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${mediaOk('video') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('video') ? '有可用提供商' : '未配置'}</span>
+                      <span className={`pill ${(mediaOk('video') || videoAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('video') || videoAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
                       <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）；「主/备」= 默认</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.video || [], { onRow: (i, p) => updateMediaRow('video', i, p), onPrimary: (i) => setMediaPrimary('video', i), media: true })}
-                    <div className="foot-note">脚本按「主」provider 出片；同类多家的自动降级随统一网关接入开放。</div>
-                    <MediaProviders channel="video" />
+                    <MediaProviders channel="video" onConfigured={setVideoAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.video || [], {
+                      onRow: (i, p) => updateMediaRow('video', i, p),
+                      onPrimary: (i) => setMediaPrimary('video', i), media: true,
+                    }, extra)} />
+                    <div className="foot-note">适配器“默认”优先；选择原供应商“主”并保存可切回原服务。不同能力不自动降级。</div>
                   </section>
                 )}
 

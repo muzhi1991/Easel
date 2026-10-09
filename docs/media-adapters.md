@@ -5,12 +5,13 @@
 ## 已实现的范围
 
 - 独立安装包 `integrations/media-adapters/`：实例配置、能力描述、可信安装包注册、输入验证和执行分发。
+- H3视频适配器：同一个 `h3-video` 对应 FL2VA/Ref2VA 两个实例，支持关键帧与多模态参考、任务恢复及原生内容下载。
 - 两个转写适配器：`openai-transcription`（单地址、真实时间戳的兼容接口，当前内网默认），`qwen-asr-aligner`（保留的两个地址直连方式）。
 - 设置页“语音转写”在同一张原供应商表中显示“自带字幕”和自定义实例，可以添加、编辑、探活、选择默认转写供应商，以及删除非默认实例；已有字幕仍优先。
 - 同一份供应商配置同时用于共享字幕脚本和视频流水线；已有转录稿/字幕优先，失败不自动切换或下载 Whisper。
 - `MediaProviders.tsx` 根据适配器描述生成配置字段，可以复用于其他媒体通道。
 
-本阶段统一适配层仅接通转写执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，尚未迁移它们的执行分发表。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3、ComfyUI 执行入口尚未接入。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
+统一适配层已接通转写和 H3 视频执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，原有供应商执行分发表仍保留。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3 已通过原生 SGLang 接入，ComfyUI 执行入口尚未迁移到适配包。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
 
 ## 安装
 
@@ -155,6 +156,80 @@ python skills/shared/scripts/ai_image.py text2img \
 
 输出包含 `provider/adapter/model/language/text/segments/words/duration`、`timestamp_source`、`approx_timeline=false`、warnings 和切片信息。上游不暴露实际 backend 时记录 unknown，不根据模型别名推测路由。
 
+## H3 视频：两套原生服务
+
+适配包0.2.0新增 `h3-video`；一个适配器、两个实例。`variant=fl2va` 使用文生/首帧/尾帧/首尾帧；`variant=ref2va` 使用图片、视频、音频及混合参考。不能把不同能力作为自动降级或备用模型。
+
+### 配置与默认选择
+
+视频设置页原供应商表同时保留原服务和 H3 实例的编辑、探活、默认选择。添加供应商选择“H3 原生视频”，填写带 `/v1` 的 Base URL、模型类型和实例名称。模型名留空按类型默认，部署服务使用 `MiniMax-H3-Turbo` / `MiniMax-H3-Ref2VA-Turbo`；无鉴权时凭证引用留空。地址写用户配置，下面仅为迁移模板：
+
+```json
+{
+  "id": "h3-fl2va",
+  "name": "H3 FL2VA Turbo",
+  "adapter": "h3-video",
+  "settings": {
+    "base_url": "http://H3_FL_HOST:18191/v1",
+    "variant": "fl2va",
+    "model": "MiniMax-H3-Turbo",
+    "timeout_seconds": 1800,
+    "poll_seconds": 3,
+    "use_proxy": false,
+    "api_key_env": ""
+  }
+}
+```
+
+Ref实例使用独立ID `h3-ref2va`、类型 `ref2va`、REF地址18192及模型 `MiniMax-H3-Ref2VA-Turbo`。只将FL实例设为 video 默认，保留原 transcribe 默认。选择顺序：显式 `--provider` → 媒体配置的 video 默认 → 旧 `.env` 的 `VIDEO_PROVIDER`。选择原供应商“主”并保存将清除 video 适配器默认，其他通道保持不变；单纯编辑非主行不清除默认。
+
+### 调用与素材
+
+```bash
+# 文生视频
+python skills/shared/scripts/ai_video.py text2video --provider h3-fl2va \
+  --prompt "A cat gently blinks. Audio: quiet room ambience." \
+  --duration 5 --ratio 16:9 -o outputs/示例/text.mp4
+
+# 首尾帧；仅首帧省略 last-frame，仅尾帧用 text2video --last-frame
+python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
+  --image outputs/示例/first.png --last-frame outputs/示例/last.png \
+  --prompt "A smooth camera movement connects the frames." \
+  --duration 5 --ratio 16:9 -o outputs/示例/keyframes.mp4
+
+# 多模态参考；各类参数都可重复
+python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
+  --ref-image outputs/示例/person.png --ref-video outputs/示例/motion.mp4 \
+  --ref-audio outputs/示例/audio.wav \
+  --prompt "Use <Picture 1> as subject, <Video 1> for motion, <Audio 1> for sound." \
+  --duration 5 --ratio 16:9 -o outputs/示例/reference.mp4
+```
+
+- 请求使用类型化 `VideoRequest`，`easel.media.generate_video` 是薄桥接；模型专属 `task/conditions/target`、Turbo参数和下载流程仅在 `h3.py`。两套服务都使用steps9，FL shift6/3、REF shift12/3，不将旧供应商字段直接发送给H3。
+- 本轮素材为本地文件，ffprobe检查内容类型，准确MIME的Base64 data URI通过JSON发送，无需SSH或额外上传服务。不接受Agent本地路径作为H20的 file URI。
+- 输出4–15秒，短边768；本轮允许16:9、9:16、1:1、4:3、3:4。视频/音频参考每段2–15秒，同类总时长不超过15秒；最多9图片/3视频/3音频、合计12份。客户端文件上限单份128MiB、合计256MiB。复杂极限组合未做压力测试。
+- Ref任务至少有一份参考；本轮首尾帧属于FL实例，不接受Ref首尾帧混用。H3默认带音频；未确认关闭字段，因此 audio=off 明确拒绝。能力声明不等于对白逐字忠实或参考音轨精确保留。
+
+### 任务记录、恢复与交付
+
+生成仍采用同步 bridge，但适配器内部使用原生异步任务生命周期。提交前原子保存 `<输出>.job.json`，收到ID后立即更新，记录provider、实际服务地址、model、task、seed和非Base64请求参数。POST失败、超时或服务失败不自动重新提交。
+
+轮询 `/videos/{id}`，仅completed后从同一个配置服务 `/videos/{id}/content` 下载；不跟随跳转、不使用响应中服务器本地路径。下载临时文件经ffprobe确认有效视频后原子替换输出。任务等待上限来自实例或显式 `--timeout`，下载独立300秒。
+
+输出位置已有任务记录时拒绝新提交。带ID的任务可使用相同实例/输出路径加 `--resume` 继续查询、重新下载；恢复时不发送POST。没有ID意味着提交结果未知，应查服务日志，不盲目重交。远端任务历史未承诺跨服务重启持久化，不代表记录能恢复已丢失的任务。
+
+```bash
+python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
+  --image outputs/示例/first.png --prompt "Resume the existing task" \
+  --ratio 16:9 --resume -o outputs/示例/keyframes.mp4
+```
+
+旧供应商显式选择时仍走原实现，不支持新参考/恢复参数时明确报错。H3实例共用本地文件锁串行调度；其他机器及Qwen生图不受此锁控制，GPU资源协调仍属于远端运维。
+
+### 安装、升级
+
+重新安装适配包，构建前端，重启Easel Web发现新实现；只同步 `ai-video-gen/SKILL.md` 和 `shared/scripts/ai_video.py`，不运行完整workspace同步。不改OpenClaw源码、共享主实例或远端模型部署。配置和备份只留用户目录。
+
 ## 从旧版本迁移
 
 - 以前的 SiliconFlow 配置不会自动变成新默认实例。可以在设置页添加 OpenAI 兼容转写实例，使用真实支持的模型与地址，并配置专用凭证引用；旧 `SILICONFLOW_*` 保留，不会擅自删除或覆盖。
@@ -206,7 +281,7 @@ class MyAdapter:
 
 注册来自已经安装的 Python 包。新增 entry point 后重启 Web，使其发现新包；CLI 下一次启动即可发现。不要重复占用已有适配器 ID。
 
-当前执行契约是同步完成的 `submit`，不是一个已经实现的通用持久化异步队列。后续图片/视频需要远端任务句柄与恢复查询时，先版本化扩展契约，再由各适配器实现提交、轮询和产物收集；不要在调用方临时加 ComfyUI 节点或 H3 特有请求字段。
+当前执行契约是同步完成的 `submit`；H3在适配器内部保存可恢复的原生任务记录，但不是一个通用持久化异步队列。后续新增图片/视频适配器需要通用远端任务句柄与恢复查询时，先版本化扩展契约，再由各适配器实现提交、轮询和产物收集；不要在调用方临时加 ComfyUI 节点或 H3 特有请求字段。
 
 ### 新媒体能力的接线
 
@@ -221,6 +296,7 @@ class MyAdapter:
 | `easel/media.py` | 薄桥接、CLI、结果原子落盘 |
 | `web/app.py` 的 `/api/settings/media*` | 通用配置与探活入口 |
 | `MediaProviders.tsx`、`api.ts`、`SettingsPanel.tsx` | 按描述生成表单及选项卡接入 |
+| `skills/shared/scripts/ai_video.py` | 视频调用 bridge，保留旧供应商、增加关键帧/参考参数 |
 | `skills/shared/scripts/asr.py` | 字幕调用 bridge，保留 SRT/ASS 渲染及显式 Whisper |
 | SDK `pipeline/run.py` 的 `st_transcribe` | 字幕优先及统一转写选择 |
 | `video_pipeline.py`、SDK `pipeline/doctor.py` | 报告默认实例配置，不再提示自动 Whisper 兜底 |
@@ -273,3 +349,11 @@ cd web/frontend && npm run build
 - 经共享 `ai_image.py text2img`，显式传 `--timeout 1800`，Python直接提交并下载1024×1024 PNG；图片校验和视觉检查通过，画面为窗边阳光中的橘猫，无文字。产物 `outputs/接口验收/qwen-easel-python.png`，不提交 Git。
 - 回归覆盖同步 JSON/multipart 请求将180/1800秒预算传到 urllib、Agnes兼容路径，以及超时只提交一次、不产生成功产物；全量416 passed / 3 skipped，技能与命令校验通过。
 - 仅同步 Easel workspace 中的生图 SKILL 与共享脚本，未运行完整同步、未改主 OpenClaw 或远端模型服务；无需重启 Web/Gateway。
+
+### H3 原生视频接入验证（2026-10-09）
+
+- 两个实例原生health和探活均成功。FL2VA通过当前生视频脚本发送一张橘猫首帧，生成并下载H.264视频，1344×768、约5.18秒，含AAC音轨，抽帧可见橘猫眨眼。
+- Ref2VA经相同脚本发送图片、FL视频及从该视频提取的音频混合参考，任务完成并通过 `/content` 下载；ffprobe检查和抽帧检查通过。输出不代表参考音轨被精确复刻或逐字对白能力。
+- 回归覆盖文生、首/尾/首尾帧与混合条件，数量/时长/能力校验，超时恢复只提交一次，未知提交状态不重交，失败不交付文件，下载原子性，以及视频默认切换不影响ASR。
+- 用户配置中保留原ASR实例，新增 h3-fl2va / h3-ref2va，默认video为FL；配置备份在用户配置目录 `media-providers.before-h3-20261009.json`。产物 `outputs/接口验收/h3-fl2va.mp4` 与 `h3-ref2va.mp4` 不提交Git。
+- 全量436 passed / 3 skipped，前端tsc/Vite构建、技能/命令校验通过；浏览器自动化连接因request-header policy获取失败未完成视觉验收，配置接口已确认两行及默认状态。
