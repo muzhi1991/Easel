@@ -15,7 +15,7 @@ layer: produce
 先选 provider 并在 `.env` 填对应 key，然后 `check` 离线校验：
 
 ```bash
-python skills/shared/scripts/ai_video.py check --provider dashscope
+.venv/bin/python skills/shared/scripts/ai_video.py check --provider dashscope
 ```
 
 | provider | 服务 | 需在 .env 配 |
@@ -31,7 +31,9 @@ python skills/shared/scripts/ai_video.py check --provider dashscope
 
 ### 已配置媒体适配器（H3）
 
-执行 `python -m easel.media providers` 查看实例与默认值。H3 在视频设置页原表格添加实例，不需要 API Key；执行 `check --provider <实例ID>` 和 `capabilities --provider <实例ID>` 检查。已选择或配置默认实例时直接使用它；不要因旧注册表不包含适配器就误报未配置或切换服务。
+媒体适配器依赖安装在项目 `.venv`，相关命令（包括 check/capabilities）必须使用 `.venv/bin/python`，避免系统 Python 误报适配包未安装。
+
+执行 `.venv/bin/python -m easel.media providers` 查看实例与默认值。H3 在视频设置页原表格添加实例，不需要 API Key；执行 `check --provider <实例ID>` 和 `capabilities --provider <实例ID>` 检查。已选择或配置默认实例时直接使用它；不要因旧注册表不包含适配器就误报未配置或切换服务。
 
 - FL2VA：文生视频、首帧、尾帧、首尾帧；Ref2VA：多图/视频/音频参考。不同能力不互相 fallback，参考任务必须显式选择 Ref2VA。
 - 默认实例等待1800秒，时长4–15秒、768p；画幅仍需用户确认。首帧用 `image2video --image`，加 `--last-frame` 可指定尾帧；仅尾帧用 `text2video --last-frame`。
@@ -40,7 +42,7 @@ python skills/shared/scripts/ai_video.py check --provider dashscope
 - 提交后任务记录在 `<输出路径>.job.json`。超时/断连先查看记录，有ID时用相同 provider/output 加 `--resume` 继续查询下载；没有ID先查服务日志。不得自动重交、中断远端队列或读取H20本地文件路径。
 
 ```bash
-python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
+.venv/bin/python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
   --ref-image outputs/主题名/person.png --ref-video outputs/主题名/motion.mp4 \
   --ref-audio outputs/主题名/ambience.wav \
   --prompt "Use <Picture 1> as subject, <Video 1> for motion and <Audio 1> for sound." \
@@ -69,14 +71,14 @@ python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
 2. **写好 prompt**：AI 视频对 prompt 敏感，按 [AI 视频提示词规范](../video-strategy/references/ai-video-prompting.md) 写镜头、运镜、风格与时长。竖版短视频用 `--ratio 9:16`。
 3. **文生视频**：
    ```bash
-   python skills/shared/scripts/ai_video.py text2video --provider dashscope \
+   .venv/bin/python skills/shared/scripts/ai_video.py text2video --provider dashscope \
      --prompt "海边日落，慢镜头推进，暖色调，电影感" --ratio 9:16 --duration 5 \
      --audio auto \
      -o outputs/主题名/clip.mp4
    ```
 4. **图生视频 / 让图动起来 / 数字人首帧**：
    ```bash
-   python skills/shared/scripts/ai_video.py image2video --provider kling \
+   .venv/bin/python skills/shared/scripts/ai_video.py image2video --provider kling \
      --image outputs/主题名/cover.png --prompt "人物微笑挥手，头发轻微飘动" \
      -o outputs/主题名/clip.mp4
    ```

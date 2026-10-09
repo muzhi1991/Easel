@@ -187,18 +187,18 @@ Ref实例使用独立ID `h3-ref2va`、类型 `ref2va`、REF地址18192及模型 
 
 ```bash
 # 文生视频
-python skills/shared/scripts/ai_video.py text2video --provider h3-fl2va \
+.venv/bin/python skills/shared/scripts/ai_video.py text2video --provider h3-fl2va \
   --prompt "A cat gently blinks. Audio: quiet room ambience." \
   --duration 5 --ratio 16:9 -o outputs/示例/text.mp4
 
 # 首尾帧；仅首帧省略 last-frame，仅尾帧用 text2video --last-frame
-python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
+.venv/bin/python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
   --image outputs/示例/first.png --last-frame outputs/示例/last.png \
   --prompt "A smooth camera movement connects the frames." \
   --duration 5 --ratio 16:9 -o outputs/示例/keyframes.mp4
 
 # 多模态参考；各类参数都可重复
-python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
+.venv/bin/python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
   --ref-image outputs/示例/person.png --ref-video outputs/示例/motion.mp4 \
   --ref-audio outputs/示例/audio.wav \
   --prompt "Use <Picture 1> as subject, <Video 1> for motion, <Audio 1> for sound." \
@@ -219,7 +219,7 @@ python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
 输出位置已有任务记录时拒绝新提交。带ID的任务可使用相同实例/输出路径加 `--resume` 继续查询、重新下载；恢复时不发送POST。没有ID意味着提交结果未知，应查服务日志，不盲目重交。远端任务历史未承诺跨服务重启持久化，不代表记录能恢复已丢失的任务。
 
 ```bash
-python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
+.venv/bin/python skills/shared/scripts/ai_video.py image2video --provider h3-fl2va \
   --image outputs/示例/first.png --prompt "Resume the existing task" \
   --ratio 16:9 --resume -o outputs/示例/keyframes.mp4
 ```
