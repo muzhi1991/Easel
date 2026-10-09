@@ -61,7 +61,9 @@ python skills/shared/scripts/ai_image.py text2img \
 - `--size`：同步模式用像素（`1024x1024` / `1536x1024` / `1024x1536`…）；异步模式用比例（`1:1` / `16:9` / `9:16`…）。
 - `--n`：生成张数（多张时按序号自动命名）。
 - `--output`：目录（多张自动编号）或含扩展名的单文件；统一放 `outputs/主题名/`。
-- 同步可加 `--quality low|medium|high`；异步可加 `--resolution 1k|2k|4k`。
+- `--timeout`：同步生成请求或异步轮询超时秒，默认180；不包含下载时间。慢速同步服务可显式传 `--timeout 1800`，超时先检查服务端状态，不自动重交。
+- 同步可加 `--quality low|medium|high`（仅限支持该参数的服务）；异步可加 `--resolution 1k|2k|4k`。
+- 若当前模型为 `qwen-image-2.1-uc-bf16`：接口仅支持文生图，使用 `--timeout 1800 --n 1`，尺寸限512/768/1024/1536/2048的正方形，默认1024x1024；不传 `--quality`，不调用下述 img2img/variations。服务繁忙429或超时不重复提交。
 
 ### 3. 图生图 / 图像编辑 img2img
 

@@ -10,7 +10,7 @@
 - 同一份供应商配置同时用于共享字幕脚本和视频流水线；已有转录稿/字幕优先，失败不自动切换或下载 Whisper。
 - `MediaProviders.tsx` 根据适配器描述生成配置字段，可以复用于其他媒体通道。
 
-本阶段仅接通转写执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，尚未迁移它们的执行分发表；Qwen Image、H3、ComfyUI 没有接入。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
+本阶段统一适配层仅接通转写执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，尚未迁移它们的执行分发表。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3、ComfyUI 执行入口尚未接入。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
 
 ## 安装
 
@@ -87,6 +87,36 @@
 默认 `httpx`，当前用户实例也已恢复为 `httpx`（2026-10-09）；不再使用 curl 绕行。此前同一 Python 在系统 Terminal 中可访问 LAN，在 Paseo Agent 和内置终端中报 `Errno 65 No route to host`，系统 curl 则正常。Paseo 环境恢复后，Python TCP、HTTP 探活和真实 ASR/对齐均成功，确认应先检查启动进程链的局域网权限与 daemon 生命周期，而不是更改服务接口。现象与 Paseo [issue #6173](https://github.com/getpaseo/paseo/issues/6173) 相似，但本机未取得该报告中“已退出的 responsible process”证据，不将其具体根因写成已证实。
 
 `curl` 仍是可显式选择的传输方式，要求系统安装 curl；不会自动 fallback 到它。两种方式都支持 multipart，不自动重试上传、不跟随重定向；凭证通过 curl stdin 配置传入，不出现在进程命令参数中。迁移时优先使用 httpx，不需要沿用旧绕行配置。配置变更在下一次任务读取，无需重启服务。
+
+## Qwen Image：现有兼容生图接口接入
+
+本轮沿用原“模型配置 → 生图”的 OpenAI 兼容供应商行，不新增独立 Qwen 行或适配器。用户部署的外部图像服务包装既有 ComfyUI，Easel 无需加载模型或处理工作流 JSON。
+
+项目 `.env` 配置（实际地址和本地配置不提交）：
+
+```dotenv
+IMG_BASE_URL=http://IMAGE_GATEWAY_HOST:18190/v1
+IMG_MODEL=qwen-image-2.1-uc-bf16
+IMG_API_KEY=local-no-auth
+IMG_NO_PROXY=1
+IMG_API_KEY_HEADER=
+IMG_API_VERSION=
+```
+
+服务无鉴权，但现有脚本要求非空 Key，因此使用占位值；必须显式填写它，避免将真实聊天 Key 作为别名发送给新地址。设置页保存 Base URL、模型和 Key；高级配置可设置内网直连及清除旧鉴权头/API版本。切换服务前本机 `.env` 备份在用户配置目录 `env.before-qwen-image-20261009`，权限0600，不提交 Git。
+
+```bash
+python skills/shared/scripts/ai_image.py text2img \
+  --prompt "一只橘猫坐在窗边，温暖的阳光，自然摄影，无文字" \
+  --size 1024x1024 --n 1 --timeout 1800 \
+  --output outputs/接口验收/qwen-easel-python.png
+```
+
+- `--timeout` 控制同步生成请求或异步轮询，缺省仍180秒；不是包括下载在内的整任务总超时。没有新增 UI 超时字段或隐式供应商超时，Agent 技能说明要求该 Qwen 模型显式传1800秒。
+- 当前接口只实现 `/images/generations`，一次一张，尺寸为512/768/1024/1536/2048的正方形。不传 `quality` 等未支持字段，不使用 img2img/variations。图片编辑后续单独接入。
+- 请求、下载均使用 Python 标准库，直接处理原有 URL/base64 返回；无需 curl 或新 Python 依赖。
+- 繁忙429、生成失败502、超时504或连接中断均不自动重交。超时不代表远端取消，应先按服务日志或返回的 prompt_id 检查 ComfyUI history/queue。
+- 代码改动集中在共享脚本中将同步请求预算接到已有参数；地址、模型仅留在本地配置。同步相关 `ai-image-gen/SKILL.md` 和共享脚本副本，不运行完整 OpenClaw 同步。
 
 ## 使用与字幕行为
 
@@ -236,3 +266,10 @@ cd web/frontend && npm run build
 - 当前 Agent 环境 Python 到转写网关的 TCP 连接三次成功，统一入口探活成功；实际传输对象为 `httpx.Client`。
 - 经默认统一入口重新转写4.204秒中文样本，正确识别“甚至出现交易几乎停滞的情况。”，13个对齐单位、1段字幕，`timestamp_source=forced_alignment`、`approx_timeline=false`，时间戳在音轨范围内，无警告。
 - 结果 `/tmp/easel-asr-httpx-validation/chinese.json` 为本地临时产物。此次仅调整实例传输配置和维护说明，无需重新安装适配包或重启 Web/Gateway，未改动远端服务。
+
+### Qwen Image 兼容接口接入验证（2026-10-09）
+
+- 本地“生图”原供应商行已配置内网图片网关和 `qwen-image-2.1-uc-bf16`，Key使用本地占位值、关闭环境代理；设置接口返回已配置，不提交用户 `.env`。
+- 经共享 `ai_image.py text2img`，显式传 `--timeout 1800`，Python直接提交并下载1024×1024 PNG；图片校验和视觉检查通过，画面为窗边阳光中的橘猫，无文字。产物 `outputs/接口验收/qwen-easel-python.png`，不提交 Git。
+- 回归覆盖同步 JSON/multipart 请求将180/1800秒预算传到 urllib、Agnes兼容路径，以及超时只提交一次、不产生成功产物；全量416 passed / 3 skipped，技能与命令校验通过。
+- 仅同步 Easel workspace 中的生图 SKILL 与共享脚本，未运行完整同步、未改主 OpenClaw 或远端模型服务；无需重启 Web/Gateway。

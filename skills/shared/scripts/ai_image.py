@@ -266,7 +266,7 @@ def _agnes_generate(base_url: str, api_key: str, model: str, prompt: str,
           f"（size={tier} ratio={ratio}，共 {count} 张，逐张请求）...", file=sys.stderr)
     merged: list[Any] = []
     for _ in range(count):
-        result = http_post(endpoint, api_key, payload, timeout=180)
+        result = http_post(endpoint, api_key, payload, timeout=args.timeout)
         data = result.get("data")
         if isinstance(data, list) and data:
             merged.extend(data)
@@ -358,7 +358,7 @@ def http_post(url: str, api_key: str, payload: dict[str, Any], timeout: int = 12
     except urllib.error.URLError as exc:
         fail(f"无法连接接口：{exc.reason}")
     except (http.client.RemoteDisconnected, TimeoutError):
-        fail("接口连接失败或超时，请稍后重试。")
+        fail("接口连接失败或超时；任务可能仍在运行，请先检查服务端任务状态，勿直接重复提交。")
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -561,7 +561,7 @@ def cmd_text2img(args: argparse.Namespace) -> None:
             payload["quality"] = args.quality
         endpoint = _api_url(base_url, "images/generations")
         print(f"[sync] 提交生成请求到 {endpoint}...", file=sys.stderr)
-        result = http_post(endpoint, api_key, payload, timeout=180)
+        result = http_post(endpoint, api_key, payload, timeout=args.timeout)
         paths = save_sync_data(result, args.output, args.format)
 
     _print_results(paths)
@@ -630,7 +630,7 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
         method="POST",
     )
     try:
-        with _open(request, 180) as response:
+        with _open(request, args.timeout) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -710,7 +710,7 @@ def cmd_variations(args: argparse.Namespace) -> None:
             method="POST",
         )
         try:
-            with _open(request, 180) as response:
+            with _open(request, args.timeout) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -795,7 +795,7 @@ def _add_common_output(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--format", choices=("png", "jpeg", "webp"), default="png",
                     help="保存格式（无 URL 后缀时的兜底），默认 png。")
     sp.add_argument("--poll-interval", type=int, default=5, help="异步轮询间隔秒，默认 5。")
-    sp.add_argument("--timeout", type=int, default=180, help="异步轮询超时秒，默认 180。")
+    sp.add_argument("--timeout", type=int, default=180, help="同步生成请求或异步轮询超时秒，默认 180；不包含图片下载。")
     sp.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")
 
 
