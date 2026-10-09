@@ -4,7 +4,7 @@
 
 ## 已实现的范围
 
-- YuE2 歌词歌曲：`MusicRequest`、异步作业、原音乐列表配置、任务恢复与 FLAC/ABC/转码输出。
+- YuE2 音乐：歌词歌曲、纯 BGM、目标生成时长、录音转谱翻唱/器乐改编；`MusicRequest`、异步作业、原音乐列表配置及任务恢复。
 - Qwen3-TTS 配音：独立 `openai-speech` 适配器与原配音列表配置。
 - RapidOCR 图片文字识别：独立适配器、共享 CLI、对话技能及“文字识别”供应商通道。
 - 独立安装包 `integrations/media-adapters/`：实例配置、能力描述、可信安装包注册、输入验证和执行分发。
@@ -448,13 +448,13 @@ SRT 是合成段真实帧数/采样率累积的句级字幕；不运行 ASR、�
 Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fish为备/手动可选；点击Qwen探活显示连接正常。这里“备”不意味着自动降级链。localhost/LAN均200，pip check通过。当前音色字段可编辑为服务返回的名称，`tts.py voices` 可列出服务音色。
 
 
-## YuE2 歌词歌曲（适配包 0.5.0）
+## YuE2 音乐（适配包 0.6.0）
 
 设置页“模型配置 → 音乐”原供应商表内添加 `yue2-music`，名称如“内网 YuE2”，设为默认。服务根地址不含 `/v1`，例如 `http://MUSIC_HOST:18194`；模型填 `YuE2-3B`，凭证引用 `EASEL_MEDIA_MUSIC_KEY`，实际 Bearer Key 放本机 `.env` 或启动环境。等待超时默认3600秒（包含排队），查询间隔5秒。迁移时复制用户配置中的实例和 defaults.music、单独迁移凭证，再安装适配包、重启 Web、同步本次 ai-music 技能；不会部署模型或修改远程路由。
 
 调用路径是对话 `ai-music` 技能 → `skills/shared/scripts/ai_music.py` → `easel.media.generate_music` → 通用 `MusicRequest` → 独立 `yue2.py`。CLI 与 Web 的通用接线已经完成；后续音乐服务注册自己的适配器和描述即可复用它们，不应把特有协议写进 Web 或技能脚本。显式 `--provider` 优先，其次用户配置 defaults.music，最后旧 MUSIC_PROVIDER。选择原内置音乐供应商会清除媒体音乐默认值，不影响转写/配音等默认值。失败不自动切至付费服务。
 
-首期仅接歌词歌曲及可选 ABC 乐谱；不是配音，不支持 `--instrumental`、请求固定秒数、参考音频上传或翻唱。风格1–2000字符，歌词1–16000字符，ABC最长64000字符，cot=full/melody/off（off 不接 ABC）。界面模型名记录部署约定，不能仅凭探活确认模型身份。当前内网部署返回 backend=torch，不代表启用了 vLLM Turbo 加速。
+支持歌词歌曲、纯 BGM、可选 ABC、目标生成时长及上传录音转谱翻唱/器乐改编。风格1–2000字符，歌曲歌词1–16000字符，纯 BGM 省略歌词；ABC最长64000字符，cot=full/melody/off（off 不接 ABC、纯 BGM）。界面模型名记录部署约定，不能仅凭探活确认模型身份。当前内网部署返回 backend=torch，不代表启用了 vLLM Turbo 加速。
 
 ```bash
 .venv/bin/python skills/shared/scripts/ai_music.py check
@@ -476,3 +476,35 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 - 用户配置新增 `internal-yue2`、defaults.music；转写、视频、OCR、配音默认值保留。凭证只在本机 `.env`，配置/环境备份保存在用户配置目录，不提交。页面原音乐列表显示新实例、默认与“连接正常”；localhost/LAN均200。
 - 全套测试500 passed/3 skipped；115技能契约、269文档命令验证与 TypeScript/Vite构建通过。
 - 新 Agent session `29e9fef2-9d31-4966-a3cb-50125b72d9cb` status=ok，约89.9秒完成整轮写歌词、生成及自检。作业 `87ca6fc987244c72850fff2dd87d25da` succeeded，原生 FLAC 42.678667秒、48000Hz、双声道；abc/semantic均未截断，后端报告 torch。产物 `outputs/YuE2对话验收/`，结果 `/tmp/easel-yue2-agent-check.json`；页面截图 `/tmp/easel-yue2-settings.png`。这些本机验收产物不进入 Git，不宣称人工试听已通过。
+
+
+### 纯 BGM、目标时长与录音翻唱扩展
+
+复用原 `yue2-music` 实例、地址和 Key，无新增供应商配置。远端需已部署第八章新版 API；更新客户端不会自动升级服务。0.6.0 安装后同步 ai-music 技能及重建前端，旧歌曲任务记录仍可 `--resume`。
+
+- `--instrumental` 映射 `/v1/jobs` 的 instrumental=true，省略歌词；cot=off 明确拒绝。服务端负责将人声乐谱转换到器乐，不在 Easel 实现模型规划/转谱算法。
+- `--duration 30` 映射 duration_seconds=30、duration_mode=target，支持10–180秒（含小数）。保存并报告目标、实测时长与偏差；偏差本身不判定作业失败，不自动裁剪、补静音、循环成品或拉伸。严格定长另用音频后处理且保留原件。
+- `--reference-audio` 扩展通用 MusicRequest，经同一 generate_music 入口由适配器选择 `/v1/covers` multipart；不额外创建“翻唱供应商”。有演唱时必须提供歌词，器乐改编则传 instrumental 并省略歌词；不能同时给 cot/ABC，因为该接口自己转谱。默认不指定时长以尽量保留结构。
+- 参考素材须为真实本地可解码音频，时长大于0且不超过180秒；客户端文件上限为40MiB减256KiB，给 UTF-8 字段与 multipart 留空间。先做受限临时快照、完整解码与时长校验，记录原路径、SHA256、字节数和媒体信息，再提交该快照，避免记录与上传内容不同。临时副本任务结束清理；用户原件不改动。无远程 URL 拉取，不自动截断超长录音。
+- 翻唱不是歌手音色克隆或伴奏分离，而是录音转谱后重新编曲。器乐改编指定目标时长可能缩短/重复谱面并改变结构；不声称逐音或节奏细节完全保留。服务端上传录音/转谱文本与音频制品清理策略不同，不能认为全部7天自动删除。
+- 作业记录增加 operation=generate/cover 和参考摘要。两种操作均先记录幂等键再 POST、立即持久化返回 ID、复用原查询/下载。已知 ID 恢复不读取原音频或歌词文件、不再上传；提交结果未知仍停止盲目重投。旧记录没有 operation 时按 generate 处理。
+
+```bash
+.venv/bin/python skills/shared/scripts/ai_music.py generate --prompt "Instrumental, gentle piano and strings, 100 BPM" --instrumental --duration 30 -o outputs/my-bgm/bgm.mp3
+.venv/bin/python skills/shared/scripts/ai_music.py generate --prompt "Mandarin acoustic folk, female vocal" --reference-audio outputs/my-cover/source.flac --lyrics-file outputs/my-cover/lyrics.txt -o outputs/my-cover/song.mp3
+.venv/bin/python skills/shared/scripts/ai_music.py generate --prompt "Instrumental solo piano" --reference-audio outputs/my-cover/source.flac --instrumental -o outputs/my-cover/instrumental.mp3
+```
+
+字段限制、上传协议、目标长度策略等特有行为继续集中在 `yue2.py`。CLI 只传递通用输入并报告时长；Skill 决定何时调用，Web 原表只展示实例与能力说明。旧 DashScope/Suno 实现不支持参考录音，传入时明确失败，不忽略输入；没有自动 fallback。
+
+
+本轮接口验收（2026-10-09，分支 feature/yue2-music-extensions）：44项 YuE2 专项测试通过，全套517 passed/3 skipped，技能契约与272条文档命令校验、TypeScript/Vite构建通过。真实 CLI 请求统一 seed=2026100930，录音参考沿用先前生成的原创验收歌曲。结果保存在本机 `outputs/YuE2扩展验收/`（ignored）：
+
+| 场景 | 作业ID | 目标 / 实际秒数 |
+| --- | --- | --- |
+| 纯 BGM | 36587cccb4c84741a8b32a6f0e671631 | 30 / 33.198667 |
+| 歌词歌曲 | f45f5061ea764fa18c57117851698cba | 30 / 39.958667 |
+| 录音转谱翻唱 | d8af3e87e1bd469689be6f00acae9315 | 未指定 / 43.398667 |
+| 录音转器乐 | 9b66e9e5d2e44618ab4c6e2c21a10ee5 | 30 / 39.958667 |
+
+四项均 succeeded、无截断、48kHz双声道，原生FLAC和MP3完整解码通过；两个器乐作业服务记录 vocal_notes=0，但尚未人工听审类人声或旋律保真。歌曲首次调用发生请求/保存异常，保留原 ID 后恢复查询/下载成功，没有提交新作业；此次未确认该瞬时异常的具体原因。上传翻唱29.87秒、器乐改编29.47秒（单次 CLI 端到端），不作吞吐承诺。

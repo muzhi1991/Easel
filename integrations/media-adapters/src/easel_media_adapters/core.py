@@ -50,11 +50,12 @@ class MusicRequest:
     cot: str | None = None
     seed: int | None = None
     instrumental: bool = False
-    duration: int | None = None
+    duration: float | None = None
     model: str | None = None
     timeout: float | None = None
     resume: bool = False
     poll_interval: float | None = None
+    reference_audio: Path | None = None
 
 
 @dataclass(frozen=True)

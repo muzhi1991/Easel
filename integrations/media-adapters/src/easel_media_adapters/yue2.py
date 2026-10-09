@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from contextlib import ExitStack, contextmanager
 import math
 import os
 import re
@@ -21,6 +23,8 @@ QUERY_TIMEOUT = 30
 DOWNLOAD_TIMEOUT = 300
 MAX_AUDIO_BYTES = 512 * 1024 * 1024
 MAX_SCORE_BYTES = 1024 * 1024
+# Leave room for UTF-8 fields and multipart overhead within the service 40 MiB limit.
+MAX_REFERENCE_BYTES = 40 * 1024 * 1024 - 256 * 1024
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -88,17 +92,26 @@ class YuE2Adapter:
     def payload(self, provider, request):
         if not isinstance(request, MusicRequest):
             raise MediaError('音乐生成需要 MusicRequest')
-        if request.instrumental:
-            raise MediaError('此 YuE2 接口尚未接入纯 BGM 工作流；不能静默生成带人声歌曲')
-        if request.duration is not None:
-            raise MediaError('YuE2 接口不支持指定生成秒数；可在生成后另行裁剪')
+        if request.duration is not None and (
+                isinstance(request.duration, bool) or not isinstance(request.duration, (int, float))
+                or not math.isfinite(request.duration) or not 10 <= request.duration <= 180):
+            raise MediaError('目标生成时长需为10–180秒，不保证输出严格等长')
         if request.model and request.model != provider['settings']['model']:
             raise MediaError('此服务使用固定部署模型，不支持请求切换模型')
         if not request.prompt.strip() or len(request.prompt) > 2000:
             raise MediaError('YuE2 风格提示词需为1–2000字符')
-        if not request.lyrics or not request.lyrics.strip() or len(request.lyrics) > 16000:
-            raise MediaError('YuE2 需要1–16000字符歌词；不能用空歌词代替纯音乐')
+        lyrics = request.lyrics or ''
+        if request.instrumental:
+            if lyrics.strip():
+                raise MediaError('纯 BGM 不能带歌词正文，请省略歌词')
+            lyrics = ''
+        elif not lyrics.strip() or len(lyrics) > 16000:
+            raise MediaError('歌曲或有人声翻唱需要1–16000字符歌词')
+        if request.reference_audio is not None and (request.cot is not None or request.abc is not None):
+            raise MediaError('录音翻唱由服务转谱，不能同时指定cot或ABC乐谱')
         cot = request.cot or provider['settings']['cot']
+        if request.instrumental and cot == 'off' and request.reference_audio is None:
+            raise MediaError('纯 BGM 需要乐谱规划，cot不能为off')
         if cot not in ('full', 'melody', 'off'):
             raise MediaError('谱面规划仅支持 full、melody、off')
         if request.abc is not None and (cot == 'off' or not request.abc.strip() or len(request.abc) > 64000):
@@ -109,7 +122,38 @@ class YuE2Adapter:
         result = {'style': request.prompt, 'lyrics': request.lyrics, 'cot': cot, 'seed': seed, 'n': 1}
         if request.abc is not None:
             result['abc'] = request.abc
+        if request.instrumental:
+            result.pop('lyrics')
+            result['instrumental'] = True
+        if request.duration is not None:
+            result.update(duration_seconds=request.duration, duration_mode='target')
+        if request.reference_audio is not None:
+            # Cover endpoint performs its own transcription; it accepts neither cot nor n.
+            result.pop('cot')
+            result.pop('n')
         return result
+
+    @contextmanager
+    def reference_snapshot(self, source):
+        source = Path(source)
+        if not source.is_file() or not 0 < source.stat().st_size <= MAX_REFERENCE_BYTES:
+            raise MediaError('参考录音须为非空本地文件，需为40MiB请求上限预留256KiB')
+        with tempfile.TemporaryDirectory(prefix='easel-music-reference-') as tmp:
+            snapshot = Path(tmp) / ('reference' + source.suffix.lower())
+            size, digest = 0, hashlib.sha256()
+            with source.open('rb') as src, snapshot.open('wb') as dst:
+                while chunk := src.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_REFERENCE_BYTES:
+                        raise MediaError('参考录音超过上传大小上限')
+                    digest.update(chunk)
+                    dst.write(chunk)
+            info = audio_info(snapshot)
+            if info['duration'] > 180:
+                raise MediaError('参考录音不能超过180秒，请明确选取片段后再上传')
+            yield snapshot, {'path': str(source.resolve()), 'sha256': digest.hexdigest(),
+                             'bytes': size, **info}
+
 
     def submit(self, provider, capability, request):
         if capability != 'generate_music' or not isinstance(request, MusicRequest):
@@ -120,6 +164,10 @@ class YuE2Adapter:
             return self._generate(provider, request, output)
 
     def _generate(self, provider, request, output):
+        with ExitStack() as resources:
+            return self._run(provider, request, output, resources)
+
+    def _run(self, provider, request, output, resources):
         if output.suffix.lower() not in ('.flac', '.mp3', '.wav', '.m4a'):
             raise MediaError('音乐输出扩展名需为flac、mp3、wav或m4a')
         s = provider['settings']
@@ -138,6 +186,7 @@ class YuE2Adapter:
         native = output if output.suffix.lower() == '.flac' else output.with_suffix('.flac')
         score = output.with_suffix('.abc')
         metadata = output.with_suffix('.music.json')
+        snapshot = None
         if request.resume:
             try:
                 record = json.loads(record_path.read_text())
@@ -149,15 +198,20 @@ class YuE2Adapter:
                     provider['id'], 'yue2-music', base, str(output)):
                 raise MediaError('恢复供应商、服务地址或输出与任务记录不同')
             payload = record.get('request')
-            if not isinstance(payload, dict) or payload.get('cot') not in ('full', 'melody', 'off'):
+            if (not isinstance(payload, dict) or (record.get('operation', 'generate') != 'cover'
+                    and payload.get('cot') not in ('full', 'melody', 'off'))):
                 raise MediaError('任务记录缺少有效原请求，不能恢复')
         else:
             if any(p.exists() for p in (record_path, output, native, score, metadata)):
                 raise MediaError('输出或任务记录已存在，请用 --resume 或新路径，勿重复提交')
             payload = self.payload(provider, request)
+            reference = None
+            if request.reference_audio is not None:
+                snapshot, reference = resources.enter_context(self.reference_snapshot(request.reference_audio))
             record = {'provider': provider['id'], 'adapter': 'yue2-music', 'base_url': base,
                       'model': s['model'], 'model_source': 'deployment_configuration',
                       'output': str(output), 'request': payload,
+                      'operation': 'cover' if reference else 'generate', 'reference_audio': reference,
                       'idempotency_key': uuid.uuid4().hex, 'status': 'submitting'}
             # No credential/header is included in any artifact.
             atomic_json(record_path, record)
@@ -165,8 +219,17 @@ class YuE2Adapter:
         try:
             with client(s) as c:
                 if not request.resume:
-                    data = json_response(c.post(base + '/v1/jobs', json=payload,
-                                                headers={'Idempotency-Key': record['idempotency_key']}, timeout=QUERY_TIMEOUT))
+                    headers = {'Idempotency-Key': record['idempotency_key']}
+                    if snapshot is not None:
+                        fields = {k: ('true' if v is True else 'false' if v is False else str(v))
+                                  for k, v in payload.items()}
+                        with snapshot.open('rb') as audio:
+                            data = json_response(c.post(base + '/v1/covers', data=fields,
+                                files={'audio': (snapshot.name, audio, 'application/octet-stream')},
+                                headers=headers, timeout=DOWNLOAD_TIMEOUT))
+                    else:
+                        data = json_response(c.post(base + '/v1/jobs', json=payload,
+                                                    headers=headers, timeout=QUERY_TIMEOUT))
                     job_id = data.get('id')
                     if not isinstance(job_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', job_id):
                         raise MediaError('提交未返回有效ID；保留幂等键，请维护者查服务记录，不换键重交')
@@ -208,7 +271,8 @@ class YuE2Adapter:
                     if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or abs(seconds - info['duration']) > max(1, info['duration'] * .02):
                         raise MediaError('下载音频时长与服务结果不符，不交付')
                     staged_score = tmp / 'score.abc'
-                    if payload['cot'] != 'off':
+                    has_score = record.get('operation') == 'cover' or payload.get('cot') != 'off'
+                    if has_score:
                         self.download(c, f'{base}/v1/jobs/{job_id}/score', staged_score, MAX_SCORE_BYTES)
                         text = staged_score.read_text(encoding='utf-8')
                         if not re.search(r'^X:', text, re.M) or not re.search(r'^K:', text, re.M):
@@ -225,7 +289,10 @@ class YuE2Adapter:
                     os.replace(final, output)
                     if staged_score.exists():
                         os.replace(staged_score, score)
-                record.update(audio=info, native_output=str(native), score=str(score) if payload['cot'] != 'off' else None)
+                target = payload.get('duration_seconds')
+                record.update(audio=info, native_output=str(native), score=str(score) if has_score else None,
+                              duration_target=target, duration_actual=info['duration'],
+                              duration_deviation=info['duration'] - target if target is not None else None)
                 atomic_json(record_path, record)
                 atomic_json(metadata, record)
                 return record
