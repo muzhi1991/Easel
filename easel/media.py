@@ -56,6 +56,17 @@ def generate_speech(text: str, output: Path, *, provider: str | None = None,
                      SpeechRequest(text, Path(output), voice, language, instructions), provider)
 
 
+def music_provider(provider: str | None = None) -> tuple[dict, dict]:
+    instance, adapter = runtime().resolve("music", provider)
+    return instance, adapter.descriptor
+
+
+def generate_music(prompt: str, output: Path, *, provider: str | None = None, **options) -> dict:
+    rt = runtime()
+    from easel_media_adapters import MusicRequest
+    return rt.submit("music", "generate_music", MusicRequest(prompt, Path(output), **options), provider)
+
+
 def speech_voices(provider: str | None = None) -> list[str]:
     instance, adapter = runtime().resolve("speech", provider)
     method = getattr(adapter, "voices", None)

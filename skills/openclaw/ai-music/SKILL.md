@@ -1,115 +1,60 @@
 ---
 name: ai-music
-description: "AI 音乐 / BGM 生成：给短视频、社媒内容生成原创背景音乐 / 配乐 / 纯音乐。通过可插拔 provider（阿里 DashScope / Suno 类第三方 API）文生音乐，异步提交→轮询→下载，产物可再裁剪/归一化或加到视频。当用户说“AI 音乐”“AI 配乐”“生成 BGM”“背景音乐”“原创音乐”“AI 作曲”“纯音乐”“给视频配乐”“做首曲子”时使用。与 tts-voiceover 的区别：tts-voiceover 生成人声口播/旁白，ai-music 生成背景音乐/配乐（无人声或带演唱）。"
+description: "AI 音乐与歌曲生成：按曲风和歌词生成带演唱歌曲，或使用支持纯音乐的供应商生成 BGM；可用 ABC 乐谱规划与修改。用户说“生成歌曲”“写首歌”“AI 音乐”“AI 配乐”“生成 BGM”“背景音乐”“原创音乐”“AI 作曲”“纯音乐”“给视频配乐”时使用。使用默认音乐供应商；口播、旁白、朗读用 tts-voiceover。"
 layer: produce
 ---
 
-# AI 音乐 / BGM 生成（AI Music）
+# AI 音乐与歌曲
 
-给短视频、Vlog、社媒内容生成**原创背景音乐 / 配乐 / 纯音乐**。全程通过共享脚本
-`skills/shared/scripts/ai_music.py` 封装音乐生成 API（可插拔 provider），
-异步提交 → 轮询 → 下载。生成的音乐可再交给 `audio_ops.py` / `video_ops.py`
-做裁剪、归一化或加到视频。
+共享入口 `skills/shared/scripts/ai_music.py`：提交任务 → 查询 → 下载音频。
 
-**边界**：本 SKILL 只做背景音乐 / 配乐。要**人声口播 / 旁白 / 朗读**用 `tts-voiceover`。
+**配置检查路径铁律**：先 `cd` 到实例 AGENTS.md 给出的 Easel 项目根，使用项目 `.venv/bin/python`；不要改用 workspace 的共享脚本副本，也不要打印 `.env` 或凭证。
 
-## 输入
+## 选择与输入
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| prompt | 是 | 风格 / 情绪 / 乐器描述（如“轻快 lo-fi，钢琴+鼓点，vlog 片头”） |
-| provider | 否 | `dashscope` 或 `suno-compatible`，也可用 env `MUSIC_PROVIDER` |
-| lyrics | 否 | 歌词（提供后走带演唱模式，不再是纯音乐） |
-| duration | 否 | 时长（秒），部分 provider 支持 |
-| instrumental | 否 | 纯音乐（无人声 BGM） |
-| output | 否 | 默认 `outputs/主题名/{name}.mp3` |
+- 显式 `--provider 实例ID或旧供应商名` → 媒体配置 music 默认 → `.env MUSIC_PROVIDER`。有默认直接使用，不再因存在多个供应商而反复询问。
+- 先运行 `check`。它是离线配置检查，不表示服务就绪或音质通过。
+- 用户要求歌曲而没给歌词时，可按主题创作歌词，写到 `outputs/<具体主题>/lyrics.txt`，以 `[Verse]` / `[Chorus]` 分段；保留完整歌词和风格提示词。
+- YuE2 当前要求非空歌词，首期仅接入歌曲与已有 ABC 乐谱；不支持 `--instrumental`、固定生成秒数或参考录音上传。用户要纯 BGM 时明确说明当前默认不支持，不偷偷改用付费服务或生成有唱词的歌曲。
+- YuE2 的 `--prompt` 描述语言、曲风、乐器、歌声和 BPM，最多2000字符；歌词最多16000字符。
+- `--cot full`（默认）规划旋律与和弦，`melody` 仅旋律，`off` 不规划乐谱。`--abc-file` 提供已有 UTF-8 ABC，不能与 off 同用。
+- 每次新请求默认产生新种子，`--seed` 可固定；保存种子有助对照，但不是跨环境音频字节复现保证。
 
-## 输出
-
-- 音乐音频文件（mp3，放入 `outputs/主题名/`）
-- 打印实际提交的 provider / model、任务轮询过程、最终输出路径
-
-## 配置（需设的环境变量）
-
-> **配置检查路径铁律**：先 `cd` 到 `AGENTS.md` 末尾给出的 Easel 项目根，确认当前目录有 `.env` 和 `skills/shared/scripts/`，再运行注册表、`check` 或生成命令。不得改用 workspace 的 `./shared/scripts/...`，也不得以 `env` / `printenv` 没显示变量为由判断未配置。
-
-在项目根 `.env` 或环境变量中设置（脚本自动向上查找 `.env`）。用户自己填 key。
-
-**通用**
+## 执行
 
 ```bash
-MUSIC_PROVIDER=dashscope        # 或 suno-compatible；也可用 --provider 覆盖
+python skills/shared/scripts/ai_music.py check
+
+# 默认音乐供应商；歌词文件放在项目产物目录
+python skills/shared/scripts/ai_music.py generate \
+  --prompt "Mandarin, warm piano pop, clear female vocal, gentle drums, 88 BPM" \
+  --lyrics-file outputs/晚风与星光/lyrics.txt \
+  -o outputs/晚风与星光/song.mp3
+
+# 修改 ABC 后重新生成整首录音，不是局部保留原波形
+python skills/shared/scripts/ai_music.py generate \
+  --prompt "Mandarin, acoustic pop, guitar and piano, warm vocal" \
+  --lyrics-file outputs/晚风与星光/lyrics.txt \
+  --abc-file outputs/晚风与星光/edited.abc --cot full --seed 42 \
+  -o outputs/晚风与星光/rearranged.flac
+
+# 超时后按相同输出位置恢复；不重复提交
+python skills/shared/scripts/ai_music.py generate --resume \
+  -o outputs/晚风与星光/song.mp3
 ```
 
-**provider = dashscope**（阿里云 DashScope / 百炼）
+不传 `--timeout` 使用媒体实例等待预算（含排队）；它不是服务端执行超时。等待期间让 exec 进入后台会话，定期查询进程输出，不因工具一次等待结束就重新提交。
 
-```bash
-DASHSCOPE_API_KEY=...           # 必填（别名 DASHSCOPE_KEY / ALIYUN_API_KEY）
-DASHSCOPE_MUSIC_MODEL=audio-generation  # 可选（兼容旧名 DASHSCOPE_MODEL）
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1   # 可选
-```
+旧 `dashscope` / `suno-compatible` 可以显式选择，仍依赖 `.env` 配置；它们是尚未用真实服务验证的旧实现，不把兼容格式称为行业标准。
 
-**provider = suno-compatible**（Suno 类第三方 API 网关）
+## 交付与任务恢复
 
-```bash
-MUSIC_API_KEY=...               # 必填
-MUSIC_BASE_URL=https://api.example.com/v1   # 必填，你的 API 根地址
-MUSIC_MODEL=music-1             # 可选，按服务商模型名调整
-```
+- 音频支持 FLAC、MP3、WAV、M4A；转码使用 FFmpeg。保留原生 FLAC、有规划时的 `.abc` 和 `.music.json` 元数据。
+- `<音频文件>.job.json` 保存任务 ID、幂等键、原请求和状态；不含 Key。输出已有文件或记录时拒绝新提交，避免覆盖或重复生成。
+- 有 ID 的超时/断线用相同供应商与输出 `--resume` 继续查询/下载。若提交结果未知、没有 ID，停止并让维护者按已保存幂等键核查服务，不换键盲目重发。
+- 仅 succeeded 且没有截断标记才交付。truncated、failed、cancelled 明确报错；HTTP 200 或可播放音频不代表完整歌曲/歌词质量通过。
+- 下载使用同一服务的认证接口，不跟随服务返回的外部 URL；完成后及时本地保存，远端有清理策略。
+- 不自动重试提交，不自动换供应商。音乐与视频可能共享远端资源，建议错峰。
+- 用户要试听时交付可播放音频；需要歌词字幕时另用 ASR/对齐，不按歌词长度伪造时间戳。
 
-## 执行步骤
-
-先跑 `python skills/shared/scripts/model_registry.py configured --group music --env-file .env`。只有一个可用时直接显式传 `--provider`；多个可用且用户没点名时，先列出选项询问，不按 `MUSIC_PROVIDER` 擅自选择。
-
-脚本路径（相对项目根）：`skills/shared/scripts/ai_music.py`。每个子命令支持 `-h`。
-
-### 1. 先自检配置 check（不发请求）
-
-```bash
-python skills/shared/scripts/ai_music.py check --provider dashscope
-```
-
-缺 key 会明确列出缺哪个 env（含别名提示）。配置齐了再往下。
-
-### 2. 生成音乐 generate
-
-```bash
-# 纯音乐 BGM（dashscope）
-python skills/shared/scripts/ai_music.py generate --provider dashscope \
-  --prompt "轻快的 lo-fi 嘻哈，钢琴 + 柔和鼓点，适合 vlog 片头" \
-  --duration 30 --instrumental \
-  -o outputs/主题名/vlog-bgm.mp3
-
-# 带演唱（suno-compatible，给了歌词）
-python skills/shared/scripts/ai_music.py generate --provider suno-compatible \
-  --prompt "温暖的民谣，吉他弹唱" \
-  --lyrics "$(cat lyrics.txt)" \
-  -o outputs/主题名/song.mp3
-```
-
-`--poll-interval`（轮询间隔，默认 5s）、`--timeout`（超时，默认 300s）可按需调。
-
-### 3. 后处理（可选，复用已有共享脚本，不在本 SKILL 重造）
-
-```bash
-# ① 裁剪到片头需要的长度
-python skills/shared/scripts/audio_ops.py trim outputs/主题名/vlog-bgm.mp3 \
-  -o outputs/主题名/bgm-8s.mp3 --duration 8
-
-# ② 归一化到社媒响度（-14 LUFS）
-python skills/shared/scripts/audio_ops.py normalize outputs/主题名/vlog-bgm.mp3 \
-  -o outputs/主题名/bgm-norm.mp3
-
-# ③ 把 BGM 加到视频（可调原声/BGM 音量比，自动循环并截断）
-python skills/shared/scripts/video_ops.py bgm -i clip.mp4 -o clip_bgm.mp4 \
-  --music outputs/主题名/vlog-bgm.mp3 --voice-volume 1.0 --music-volume 0.3
-```
-
-## 规则
-
-1. **先 check 再 generate** — 缺 key 时 check 给出清晰中文提示，不浪费一次失败请求。
-2. **绝不覆盖原始素材** — 只写新文件到 `outputs/主题名/`。
-3. **不重造能力** — 裁剪 / 归一化 / 加视频 BGM 复用 `audio_ops.py` / `video_ops.py`。
-4. **provider 可插拔** — 换服务商只改 `--provider` + env，SKILL 流程不变。
-5. **与 tts-voiceover 分工** — 背景音乐/配乐找 ai-music，人声配音找 tts-voiceover。
-   两者可组合：ai-music 出 BGM + tts-voiceover 出旁白 → `video_ops.py bgm` 混音。
+裁剪、响度归一化与配视频复用 `audio_ops.py` / `video_ops.py`；裁剪属于后处理，不宣称模型精确生成了指定秒数。

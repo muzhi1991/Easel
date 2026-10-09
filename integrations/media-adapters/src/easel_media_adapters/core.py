@@ -42,6 +42,22 @@ class SpeechRequest:
 
 
 @dataclass(frozen=True)
+class MusicRequest:
+    prompt: str
+    output: Path
+    lyrics: str | None = None
+    abc: str | None = None
+    cot: str | None = None
+    seed: int | None = None
+    instrumental: bool = False
+    duration: int | None = None
+    model: str | None = None
+    timeout: float | None = None
+    resume: bool = False
+    poll_interval: float | None = None
+
+
+@dataclass(frozen=True)
 class VideoRequest:
     prompt: str
     output: Path
@@ -104,7 +120,8 @@ class MediaRuntime:
             from .h3 import H3Adapter
             from .rapidocr import RapidOCRAdapter
             from .speech import OpenAISpeechAdapter
-            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter(), "openai-speech": OpenAISpeechAdapter()}
+            from .yue2 import YuE2Adapter
+            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter(), "openai-speech": OpenAISpeechAdapter(), "yue2-music": YuE2Adapter()}
             for entry in importlib.metadata.entry_points(group="easel.media_adapters"):
                 if entry.name not in adapters:
                     adapters[entry.name] = entry.load()()
