@@ -154,6 +154,8 @@ MODEL_GROUPS: dict[str, dict[str, Any]] = {
                 "id": "fish-audio", "name": "Fish Audio", "keys": [
                     _key("FISH_API_KEY", "API Key"),
                     _key("FISH_BASE_URL", "根地址", required=False, secret=False),
+                    _key("FISH_TTS_MODEL", "TTS 模型（默认免费）", required=False, secret=False,
+                         choices=("s2.1-pro-free", "s2.1-pro", "s2-pro", "s1", "drama-3-preview")),
                 ],
             },
             {

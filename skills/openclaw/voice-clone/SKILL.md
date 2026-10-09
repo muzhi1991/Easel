@@ -25,7 +25,7 @@ python skills/shared/scripts/voice_clone.py check --provider minimax --env-file 
 |----------|------|----------|
 | `dashscope` | 阿里 CosyVoice 声音复刻 | `DASHSCOPE_API_KEY`（可选 `DASHSCOPE_TTS_MODEL`/`DASHSCOPE_BASE_URL`） |
 | `minimax` | MiniMax 语音克隆 | `MINIMAX_API_KEY`、`MINIMAX_GROUP_ID`（可选 `MINIMAX_MODEL`） |
-| `fish-audio` | Fish Audio | `FISH_API_KEY`（可选 `FISH_BASE_URL`） |
+| `fish-audio` | Fish Audio | `FISH_API_KEY`（可选 `FISH_BASE_URL` / `FISH_TTS_MODEL`，默认 `s2.1-pro-free`） |
 | `openai-compatible` | OpenAI 兼容 /audio/speech | `VOICE_API_KEY`、`VOICE_BASE_URL`（预置 voice，非零样本克隆） |
 | `gemini` | Google Gemini TTS | `GEMINI_API_KEY`（可选 `GEMINI_TTS_MODEL`/`GEMINI_VOICE`/`GEMINI_BASE_URL`） |
 
@@ -65,7 +65,7 @@ python skills/shared/scripts/voice_clone.py clone --provider minimax \
   --voice-id my_voice --text "大家好，欢迎来到我的频道" --speed 1.0 \
   -o outputs/主题名/vo.mp3
 ```
-fish-audio 也可直接给参考音频：`--sample ref.mp3 --sample-text "参考音频的文字"`。
+fish-audio 不传音色时使用官方默认音色；也可直接给参考音频：`--sample ref.mp3 --sample-text "参考音频的文字"`。
 
 ## 合规红线（必须遵守）
 

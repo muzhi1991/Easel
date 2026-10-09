@@ -20,7 +20,7 @@ dashscope·gemini·openai 自然语言指令；SiliconFlow CosyVoice2 用内联 
   【通用】 VOICE_PROVIDER（或 --provider）
   【dashscope】 DASHSCOPE_API_KEY，可选 DASHSCOPE_TTS_MODEL / DASHSCOPE_BASE_URL
   【minimax】 MINIMAX_API_KEY、MINIMAX_GROUP_ID，可选 MINIMAX_MODEL / MINIMAX_BASE_URL
-  【fish-audio】 FISH_API_KEY，可选 FISH_BASE_URL
+  【fish-audio】 FISH_API_KEY，可选 FISH_BASE_URL / FISH_TTS_MODEL（默认 s2.1-pro-free）
   【openai-compatible】 VOICE_API_KEY、VOICE_BASE_URL，可选 VOICE_MODEL、VOICE_INSTRUCT_MODE(field|inline)
   【gemini】 GEMINI_API_KEY，可选 GEMINI_TTS_MODEL / GEMINI_VOICE / GEMINI_BASE_URL
 
@@ -362,6 +362,9 @@ def clone_dashscope(a, out: Path) -> Path:
 
 def clone_fish(a, out: Path) -> Path:
     key = require_env("FISH_API_KEY")
+    model = a.model or os.environ.get("FISH_TTS_MODEL", "").strip() or "s2.1-pro-free"
+    if model not in {"s2.1-pro-free", "s2.1-pro", "s2-pro", "s1", "drama-3-preview"}:
+        fail("不支持的 Fish 模型名；拒绝发送，避免上游静默回退到付费模型。")
     base = (os.environ.get("FISH_BASE_URL", "").strip() or "https://api.fish.audio").rstrip("/")
     payload: dict[str, Any] = {"text": a.text, "format": out.suffix.lstrip(".") or "mp3"}
     if a.voice_id:
@@ -371,12 +374,11 @@ def clone_fish(a, out: Path) -> Path:
         import base64
         payload["references"] = [{"audio": base64.b64encode(Path(a.sample).read_bytes()).decode(),
                                   "text": a.sample_text or ""}]
-    else:
-        fail("fish-audio 需 --voice-id（model_id）或 --sample（参考音频）之一。")
+    # 未指定参考音色时使用官方默认音色（官方 quickstart 支持）。
     req = urllib.request.Request(
         f"{base}/v1/tts", data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                 "User-Agent": UA}, method="POST")
+                 "User-Agent": UA, "model": model}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=180) as resp:
             return _save_bytes(resp.read(), out)  # fish 直接返回音频字节
@@ -410,7 +412,7 @@ def clone_openai(a, out: Path) -> Path:
         f"{base}/audio/speech",
         data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                 "User-Agent": UA}, method="POST")
+                 "User-Agent": UA, "model": model}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=180) as resp:
             return _save_bytes(resp.read(), out)
