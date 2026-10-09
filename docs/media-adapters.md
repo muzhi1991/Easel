@@ -508,3 +508,8 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 | 录音转器乐 | 9b66e9e5d2e44618ab4c6e2c21a10ee5 | 30 / 39.958667 |
 
 四项均 succeeded、无截断、48kHz双声道，原生FLAC和MP3完整解码通过；两个器乐作业服务记录 vocal_notes=0，但尚未人工听审类人声或旋律保真。歌曲首次调用发生请求/保存异常，保留原 ID 后恢复查询/下载成功，没有提交新作业；此次未确认该瞬时异常的具体原因。上传翻唱29.87秒、器乐改编29.47秒（单次 CLI 端到端），不作吞吐承诺。
+
+
+扩展已合并并推送 dev，运行适配包0.6.0，仅重启 Web并同步本次 ai-music 技能；原实例地址、Key、默认配置和两个 Gateway均未改动。localhost/LAN200，原音乐列表新说明与探活通过，截图 `/tmp/easel-yue2-extensions-settings.png`。
+
+新 Agent session `85c463aa-0fb9-47f2-835f-134122584a67` status=ok，约114.9秒完成真实参考录音纯钢琴器乐改编。作业 `dfa84d195ff74e2ebee42c61f90453d0` operation=cover，instrumental=true、duration_seconds=30、duration_mode=target，没有歌词或cot/ABC；原参考录音42.598667秒，记录SHA256。结果40.078667秒、偏差+10.078667秒，无截断，服务 vocal_notes=0。Agent 使用恢复查询完成任务，并明确报告未听审，不把目标当作严格长度。产物 `outputs/YuE2扩展对话验收/piano.mp3` 及其FLAC/ABC/元数据；结果 `/tmp/easel-yue2-extensions-agent.json`，均为本机 ignored 验收材料。
