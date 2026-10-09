@@ -768,7 +768,7 @@ export default function SettingsPanel({ onClose }: Props) {
                     <MediaProviders channel="music" onConfigured={setMusicAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.music || [], {
                       onRow: (i, p) => updateMediaRow('music', i, p), onPrimary: (i) => setMediaPrimary('music', i), media: true,
                     }, extra)} />
-                    <div className="foot-note">默认媒体供应商优先；失败不会自动换服务。YuE2 首期支持歌词歌曲，不支持指定生成秒数或纯 BGM。</div>
+                    <div className="foot-note">默认媒体供应商优先；失败不会自动换服务。YuE2 支持歌曲、纯 BGM 和录音转谱翻唱；目标10–180秒，实际时长可能有偏差。</div>
                   </section>
                 )}
 

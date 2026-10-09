@@ -466,15 +466,20 @@ def cmd_generate(args: argparse.Namespace) -> int:
         fail("--prompt 不能为空，请描述音乐风格")
     if provider not in PROVIDERS:
         from easel.media import generate_music
-        lyrics = Path(args.lyrics_file).read_text(encoding="utf-8") if args.lyrics_file else args.lyrics
-        abc = Path(args.abc_file).read_text(encoding="utf-8") if args.abc_file else None
+        lyrics = None if args.resume else (Path(args.lyrics_file).read_text(encoding="utf-8") if args.lyrics_file else args.lyrics)
+        abc = Path(args.abc_file).read_text(encoding="utf-8") if args.abc_file and not args.resume else None
         result = generate_music(args.prompt or "", Path(args.output), provider=provider,
                                 lyrics=lyrics, abc=abc, cot=args.cot, seed=args.seed,
                                 instrumental=args.instrumental, duration=args.duration,
-                                model=args.model, timeout=args.timeout, resume=args.resume, poll_interval=args.poll_interval)
+                                model=args.model, timeout=args.timeout, resume=args.resume, poll_interval=args.poll_interval,
+                                reference_audio=Path(args.reference_audio) if args.reference_audio and not args.resume else None)
         print(f"生成完成：provider={result['provider']}，model={result['model']}，任务={result['id']}")
         print(f"时长={result['audio']['duration']:.2f}s，音频={result['output']}，乐谱={result.get('score') or '无'}")
+        if result.get('duration_target') is not None:
+            print(f"目标={result['duration_target']:g}s，实际={result['duration_actual']:.2f}s，偏差={result['duration_deviation']:+.2f}s（未裁剪）")
         return 0
+    if args.reference_audio:
+        fail("此旧供应商没有接入参考录音，不能忽略该输入")
     if args.resume or args.abc_file or args.cot or args.seed is not None:
         fail("此旧供应商不支持恢复、乐谱、规划或seed参数")
     if args.lyrics_file:
@@ -516,7 +521,8 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--cot", choices=["full", "melody", "off"], help="谱面规划（媒体实例）")
     pg.add_argument("--seed", type=int, help="随机种子（媒体实例）")
     pg.add_argument("--resume", action="store_true", help="按输出任务记录恢复查询/下载，不提交新任务")
-    pg.add_argument("--duration", type=int, help="时长（秒），部分 provider 支持")
+    pg.add_argument("--reference-audio", help="用于翻唱或器乐改编的本地录音（媒体实例）")
+    pg.add_argument("--duration", type=float, help="目标生成秒数；YuE2为10–180秒，不保证严格等长")
     pg.add_argument("--instrumental", action="store_true",
                     help="纯音乐（无人声 BGM）")
     pg.add_argument("--model", help="覆盖模型名（默认读 env / 内置默认）")
