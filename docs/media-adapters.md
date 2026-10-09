@@ -388,3 +388,11 @@ Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体
 真实验证使用已有 RapidOCR 服务：中文“图片文字识别验收”和“订单编号 739162 ABC”完整识别，两文字框；空白图片返回0框且明确提示。EXIF 旋转样本也正确识别两行文字，输出尺寸1000×300，原始响应300×1000保留并明确提示校正。此固定样本验证不代表一般识别准确率保证。
 
 本次全量测试459 passed / 3 skipped，技能结构/命令检查及前端 tsc+Vite 构建通过。验收产物位于本地 `outputs/文字识别验收/`，不提交 Git。
+
+### 对话链路验收与运行环境
+
+2026-10-09，新 Easel Agent 会话 `c6b2b9ef-0e71-4a9e-aa1f-9f23ce6a0b21` 读取 `image-ocr` 技能，经 exec 调用项目 `.venv` 的共享脚本，再读取 TXT，最终正确返回中文及订单数字，status=ok、26.4秒；JSON provider=internal-rapidocr。结果 `/tmp/easel-ocr-validation/agent-after-restart.json`，脱敏轨迹 `.openclaw/trajectory-exports/rapidocr-check-fixed`，均不提交 Git。
+
+首次对话验收失败：同一 Homebrew Python 在当前维护进程直接调用成功，在此前启动的 Easel Gateway 子进程中原始 socket.connect 报 `Errno 65 No route to host`；不是图片响应格式或供应商配置错误。仅停止旧 Easel Gateway并通过当前维护环境 detached 启动官方 `easel gateway start` 后，同一 OCR 请求及完整 Agent 链路成功。主 OpenClaw 未重启，未改远端服务、系统权限、供应商传输或聊天模型。证据支持启动进程环境影响局域网访问；具体 macOS responsible-process 权限机制未单独证实，不把它写成已确诊系统根因。
+
+后续若终端成功而对话访问 LAN 失败，应在真正执行任务的 Gateway 子进程复测，而不是仅凭终端结果判断服务可用。先检查进程生命周期/权限上下文，不重新引入自动 curl 绕行。重启需要等旧 Gateway 排空退出；停止接收连接不表示已释放状态目录，新实例应在旧进程退出后启动。原失败轨迹 `rapidocr-check` 保留用于对照。
