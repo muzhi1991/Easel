@@ -363,13 +363,14 @@ export default function SettingsPanel({ onClose }: Props) {
 
   useEffect(() => {
     const refresh = () => { void fetchModelChannels().then((d) => {
-      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [] }));
+      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [], speech: d.channels.speech?.rows || [] }));
     }); };
     window.addEventListener('easel-media-config', refresh);
     return () => window.removeEventListener('easel-media-config', refresh);
   }, []);
 
   const [videoAdapterConfigured, setVideoAdapterConfigured] = useState(false);
+  const [speechAdapterConfigured, setSpeechAdapterConfigured] = useState(false);
   const mediaOk = (ch: string) => (mediaRows[ch] || []).some((r) => r.result === '已配置');
 
   const cacheKeyFor = (r: ModelRow) => {
@@ -717,13 +718,14 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'speech' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${mediaOk('speech') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('speech') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建）；「主/备」= 默认</span>
+                      <span className={`pill ${(mediaOk('speech') || speechAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('speech') || speechAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
+                      <span className="desc">选择默认配音服务；其他供应商手动可选</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.speech || [], { onRow: (i, p) => updateMediaRow('speech', i, p), onPrimary: (i) => setMediaPrimary('speech', i), media: true })}
-                    <div className="foot-note">配音脚本按「主」provider 合成；本地 VoxCPM / edge-tts 在视频产线里可直接替代。</div>
-                    <MediaProviders channel="speech" />
+                    <MediaProviders channel="speech" onConfigured={setSpeechAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.speech || [], {
+                      onRow: (i, p) => updateMediaRow('speech', i, p), onPrimary: (i) => setMediaPrimary('speech', i), media: true,
+                    }, extra)} />
+                    <div className="foot-note">媒体默认供应商优先。选择内网配音后，失败明确报错；Fish 和 Edge 可手动选用。</div>
                   </section>
                 )}
 

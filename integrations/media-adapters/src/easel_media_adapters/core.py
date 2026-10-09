@@ -33,6 +33,15 @@ class OCRRequest:
 
 
 @dataclass(frozen=True)
+class SpeechRequest:
+    text: str
+    output: Path
+    voice: str | None = None
+    language: str | None = None
+    instructions: str | None = None
+
+
+@dataclass(frozen=True)
 class VideoRequest:
     prompt: str
     output: Path
@@ -94,7 +103,8 @@ class MediaRuntime:
             from .openai import OpenAITranscriptionAdapter
             from .h3 import H3Adapter
             from .rapidocr import RapidOCRAdapter
-            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter()}
+            from .speech import OpenAISpeechAdapter
+            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter(), "openai-speech": OpenAISpeechAdapter()}
             for entry in importlib.metadata.entry_points(group="easel.media_adapters"):
                 if entry.name not in adapters:
                     adapters[entry.name] = entry.load()()

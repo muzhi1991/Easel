@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
 
 # ── 常用中文音色（名称 → 简介）───────────────────────────────────────
@@ -295,6 +296,68 @@ def _run_closed(text: str, out: Path, fmt: str, subtitle: Path | None, voice: st
             _transcode(target_mp3, out, fmt)
 
 
+def _speech_default() -> str | None:
+    try:
+        from easel_media_adapters import MediaRuntime
+    except ImportError:
+        return None
+    return MediaRuntime().load()["defaults"].get("speech")
+
+
+def _run_adapter(text: str, out: Path, fmt: str, subtitle: Path | None,
+                 voice: str | None, provider: str | None, instructions: str | None) -> dict:
+    from easel.media import generate_speech, write_transcript
+    from output_paths import validate_output_path
+    out = validate_output_path(out)
+    if subtitle:
+        subtitle = validate_output_path(subtitle)
+        if subtitle == out:
+            raise ValueError("字幕和音频不能使用同一路径")
+    # Bound each request for long unpunctuated text as well as ordinary sentences.
+    chunks = [s[i:i+200] for s in _split_sentences(text) for i in range(0, len(s), 200)]
+    segments, elapsed, audio_format = [], 0.0, None
+    with tempfile.TemporaryDirectory() as directory:
+        joined = Path(directory) / "joined.wav"
+        with wave.open(str(joined), "wb") as writer:
+            for index, chunk in enumerate(chunks):
+                part = Path(directory) / f"part-{index}.wav"
+                result = generate_speech(chunk, part, provider=provider, voice=voice, instructions=instructions)
+                with wave.open(str(part), "rb") as reader:
+                    current = (reader.getnchannels(), reader.getsampwidth(), reader.getframerate())
+                    if audio_format is None:
+                        audio_format = current
+                        writer.setnchannels(current[0]); writer.setsampwidth(current[1]); writer.setframerate(current[2])
+                    elif current != audio_format:
+                        raise ValueError("分段音频参数发生变化，不能直接拼接")
+                    writer.writeframes(reader.readframes(reader.getnframes()))
+                duration = result["duration"]
+                segments.append({"text":chunk, "start":elapsed, "end":elapsed+duration})
+                elapsed += duration
+        # Stage conversion beside the final output; replace only after complete success.
+        with tempfile.TemporaryDirectory(dir=out.parent) as staging:
+            staged = Path(staging) / ("speech." + fmt)
+            if fmt == "wav":
+                shutil.copyfile(joined, staged)
+            else:
+                _transcode(joined, staged, fmt)
+            os.replace(staged, out)
+        if subtitle:
+            subtitle.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=subtitle.parent, delete=False) as f:
+                name = f.name
+                f.write("\n".join(f"{i}\n{_srt_ts(seg['start'])} --> {_srt_ts(seg['end'])}\n{seg['text']}\n"
+                                  for i, seg in enumerate(segments,1)))
+            try:
+                os.replace(name, subtitle)
+            finally:
+                Path(name).unlink(missing_ok=True)
+        metadata = {**result, "output":str(out), "format":fmt, "duration":elapsed,
+                    "segments":segments, "subtitle":str(subtitle) if subtitle else None,
+                    "timestamp_source":"synthesized_chunk_duration"}
+        write_transcript(metadata,out.with_suffix('.tts.json'))
+        return metadata
+
+
 # ── 子命令 ──────────────────────────────────────────────────────────
 def cmd_speak(args) -> int:
     text = _read_text(args)
@@ -311,6 +374,23 @@ def cmd_speak(args) -> int:
     if subtitle:
         subtitle.parent.mkdir(parents=True, exist_ok=True)
 
+    # Explicit engine/provider overrides the adapter default; selected adapter errors never fall back.
+    engine = getattr(args, "engine", "auto")
+    provider = getattr(args, "provider", None)
+    use_adapter = engine == "adapter" or (engine == "auto" and (provider or _speech_default()))
+    if provider and engine in ("closed", "edge"):
+        _die("--provider 是媒体实例 ID，请使用 auto 或 adapter 引擎", code=2)
+    if use_adapter:
+        if args.rate or args.volume or args.pitch:
+            _die("当前适配器不接受 Edge 的 rate/volume/pitch；请使用 --instructions", code=2)
+        try:
+            result = _run_adapter(text,out,fmt,subtitle,args.voice,provider,args.instructions)
+        except (RuntimeError, ValueError, OSError) as exc:
+            _die(f"媒体配音失败：{exc}（未自动切换供应商）",code=4)
+        print(f"✅ {out} ({result['duration']:.2f}s, provider={result['provider']}, voice={result['voice']})")
+        if subtitle:
+            print(f"✅ 字幕 {subtitle}")
+        return 0
     # 闭源优先：配了 VOICE_PROVIDER(或 --engine closed) → 走闭源云 TTS(好嗓子)，edge 仅兜底。
     engine = getattr(args, "engine", "auto")
     use_closed = engine == "closed" or (engine == "auto" and _closed_provider())
@@ -331,14 +411,14 @@ def cmd_speak(args) -> int:
     # edge-tts 原生出 mp3；非 mp3 时先合成临时 mp3 再转码。
     if fmt == "mp3":
         _run_edge_tts(
-            text, out, voice=args.voice, rate=args.rate, volume=args.volume,
+            text, out, voice=args.voice or DEFAULT_VOICE, rate=args.rate, volume=args.volume,
             pitch=args.pitch, subtitle=subtitle, proxy=args.proxy,
         )
     else:
         with tempfile.TemporaryDirectory() as d:
             tmp_mp3 = Path(d) / "tts.mp3"
             _run_edge_tts(
-                text, tmp_mp3, voice=args.voice, rate=args.rate,
+                text, tmp_mp3, voice=args.voice or DEFAULT_VOICE, rate=args.rate,
                 volume=args.volume, pitch=args.pitch, subtitle=subtitle,
                 proxy=args.proxy,
             )
@@ -354,6 +434,13 @@ def cmd_speak(args) -> int:
 
 
 def cmd_voices(args) -> int:
+    if args.engine == "adapter" or (args.engine == "auto" and (args.provider or _speech_default())):
+        from easel.media import speech_voices
+        try:
+            print("\n".join(speech_voices(args.provider)))
+        except RuntimeError as exc:
+            _die(str(exc),code=4)
+        return 0
     """列出常用中文音色。默认用内置精选表，--all 走 edge-tts 拉全量 zh-。"""
     if args.all:
         binp = _edge_tts_bin()
@@ -432,10 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("-f", "--file", help="从文本文件读取内容（长文本推荐）")
     p.add_argument("-o", "--output", required=True,
                    help="输出音频路径（扩展名决定格式，默认 mp3）")
-    p.add_argument("-v", "--voice", default=DEFAULT_VOICE,
+    p.add_argument("-v", "--voice", default=None,
                    help=f"音色（edge 传音色名；闭源传 voice-id 如 FunAudioLLM/CosyVoice2-0.5B:alex）")
-    p.add_argument("--engine", choices=["auto", "closed", "edge"], default="auto",
-                   help="配音引擎：auto=配了 VOICE_PROVIDER 走闭源(好嗓子)否则 edge；closed=强制闭源；edge=强制 edge(AI 味)")
+    p.add_argument("--engine", choices=["auto", "adapter", "closed", "edge"], default="auto",
+                   help="auto=媒体默认优先，其次旧 VOICE_PROVIDER；adapter=媒体服务；closed=旧供应商；edge=Edge")
+    p.add_argument("--provider", help="媒体语音实例 ID（不传则用配音默认实例）")
+    p.add_argument("--instructions", help="语音风格指令（媒体适配器）")
     p.add_argument("--rate", help="语速，如 +10%% / -20%%")
     p.add_argument("--volume", help="音量，如 +20%% / -10%%")
     p.add_argument("--pitch", help="音调，如 +2Hz / -5Hz")
@@ -446,7 +535,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--proxy", help="外网代理（默认读 https_proxy/http_proxy 环境变量）")
     p.set_defaults(func=cmd_speak)
 
-    p = sub.add_parser("voices", help="列出常用中文音色")
+    p = sub.add_parser("voices", help="列出语音服务音色，未配适配器时列 Edge 音色")
+    p.add_argument("--provider", help="媒体语音实例 ID")
+    p.add_argument("--engine", choices=["auto", "adapter", "edge"], default="auto")
     p.add_argument("--all", action="store_true",
                    help="调 edge-tts 拉取全量 zh- 音色（需外网）")
     p.add_argument("--proxy", help="外网代理（默认读环境变量）")
@@ -469,7 +560,10 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "cmd", None):
         ap.print_help()
         return 0
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (RuntimeError, ValueError, OSError) as exc:
+        _die(str(exc), code=4)
 
 
 if __name__ == "__main__":

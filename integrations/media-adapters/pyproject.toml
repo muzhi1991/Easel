@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easel-media-adapters"
-version = "0.3.0"
+version = "0.4.0"
 description = "Independent media adapters for Easel"
 requires-python = ">=3.10"
 dependencies = ["httpx>=0.27,<1", "Pillow>=10,<13"]
@@ -15,6 +15,7 @@ openai-transcription = "easel_media_adapters.openai:OpenAITranscriptionAdapter"
 
 h3-video = "easel_media_adapters.h3:H3Adapter"
 rapidocr = "easel_media_adapters.rapidocr:RapidOCRAdapter"
+openai-speech = "easel_media_adapters.speech:OpenAISpeechAdapter"
 
 [tool.setuptools.packages.find]
 where = ["src"]

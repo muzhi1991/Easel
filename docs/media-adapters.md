@@ -406,3 +406,32 @@ Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体
 依据：[Fish API 快速开始](https://docs.fish.audio/developer-guide/getting-started/quickstart)、[TTS 模型 header](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[API 价格](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)。
 
 本次真实验收：明确选择 `s2.1-pro-free`，使用官方默认音色生成一句中文，返回 44KB MP3、ffprobe 时长 2.795 秒。未核查调用前后账户积分，不推断是否扣网页积分。离线验证 463 passed / 3 skipped，技能与命令验证通过。
+
+## OpenAI 兼容 TTS / 内网 Qwen3-TTS（2026-10-09）
+
+适配包 0.4.0 新增 `openai-speech`，通道 `speech`，能力 `generate_speech`。请求、可选语言/风格字段、音色查询、权重校验、WAV 校验都在独立 `speech.py`；Easel 仅增加 SpeechRequest/薄桥接，`tts.py` 负责分句、拼接、转码与字幕。设置页原“配音”列表内添加实例，不增加单独供应商列表。
+
+用户配置示例（不是仓库内置个人地址）：
+
+```json
+{"id":"internal-qwen-tts","name":"内网 Qwen3-TTS","adapter":"openai-speech","settings":{"base_url":"http://TTS_HOST:18193/v1","model":"qwen3-tts","voice":"vivian","language":"Chinese","expected_model_root":"CustomVoice","timeout_seconds":300,"use_proxy":false,"api_key_env":""}}
+```
+
+无鉴权服务不要求占位 key，也不借用聊天凭证。`api_key_env` 是专用环境变量名，需要鉴权才设置。语言是可选服务扩展，普通 OpenAI TTS 可留空；风格来自实例默认或 CLI `--instructions`。`expected_model_root` 非空时，生成前核对 `/models` 对应模型的 root；本实例设 CustomVoice，避免共享别名切到 Base/VoiceDesign 后错误调用。此检查不能把权重检查与请求绑定为事务，切换服务须安排维护窗口。音色查询 `/audio/voices` 为可选扩展，不保证所有 OpenAI 服务支持。
+
+```bash
+.venv/bin/python skills/shared/scripts/tts.py voices --provider internal-qwen-tts
+.venv/bin/python skills/shared/scripts/tts.py speak --provider internal-qwen-tts --voice vivian --instructions "自然亲切" --text "欢迎收听本期内容。" -o outputs/中文解说/voice.mp3 --subtitle outputs/中文解说/voice.srt
+```
+
+实际优先顺序：显式 `--engine` / 媒体 `--provider` → 媒体配置 `defaults.speech` → 旧 `.env VOICE_PROVIDER` → Edge。这不是多供应商自动 fallback 列表。明确选择/默认使用媒体实例后，超时、429、错误响应均不自动重试，也不切 Fish/Edge。旧 `--engine closed` 路径仍调用 VOICE_PROVIDER；本机该变量保留 Fish，故可手动选 Fish。`--engine edge` 手动用 Edge。设置页选旧供应商为主并保存，会清除 speech 媒体默认；新增/切换 speech 默认不改变转写、视频、OCR 默认及用户聊天模型。
+
+第一阶段仅预置音色/风格，不开放 Base 参考音频克隆、VoiceDesign 或实时 PCM 流。服务端一次只加载一个模式，task_type 不会自行换模型。请求使用非流式 WAV、可配置单请求300秒、无自动重试、默认不读取环境代理。每句及超长无标点文本按最多200字符拆段；句间韵律可能不连续。校验非空完整 PCM WAV 后原子保存分段音频；拼接和转码成功才替换最终音频。音频、SRT、元数据分别保存，不承诺多文件事务。
+
+SRT 是合成段真实帧数/采样率累积的句级字幕；不运行 ASR、不估算逐字时间戳。`.tts.json` 记录供应商、模型、音色、段落和 `timestamp_source=synthesized_chunk_duration`。后续如需逐字对齐，应另调用已有对齐服务。Edge rate/volume/pitch 在此适配器明确拒绝，避免静默忽略；使用 instructions。输出遵守 outputs 目录契约。
+
+迁移：安装 `integrations/media-adapters`，配置实例及 `defaults.speech`，前端 build 并重启 Web；仅更新 tts-voiceover 技能的相关段落，保留实例项目路径说明，不执行完整 workspace 同步。其他兼容 TTS 服务新增实例即可；协议不同时新增独立适配器，不在 tts.py 增加服务专有分支。不修改远端模型服务或 OpenClaw 源码。
+
+真实短句验收（隔离临时配置）：服务 `/models` 确認 1.7B CustomVoice，音色查询10项；显式 `serena` 和自然亲切指令生成两句中文，总时长4.56秒。WAV拼接转MP3后 ffprobe 同为4.56秒，SRT两段连续覆盖0–4.56秒。已有 Qwen ASR/对齐回读“欢迎收听千问配音测试，本次验证码是八三六二。”完整，与输入文字一致（标点有差异）。这只验证固定短样本，不代表所有音色、长文、情绪或并发性能。
+
+提交前验证：473 passed / 3 skipped；115 个技能契约、271 条命令校验通过；前端 tsc + Vite build 通过。
