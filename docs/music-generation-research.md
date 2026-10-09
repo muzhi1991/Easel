@@ -4,7 +4,7 @@
 
 ## 结论
 
-若后续需要长期通过 Easel 自动生成音乐，优先评估 **ACE-Step 1.5**：歌曲和纯 BGM 都能做，模型 MIT 许可，官方直接提供异步 HTTP 服务，较适合目前独立媒体适配层。若主要做视频背景音乐，增加 **Stable Audio 3 Small Music** 对照试听；它有更轻的 CPU/GPU 路径，但权重许可有条件。想追求完整人声歌曲，可以评估 **MiniMax Music 3**，其服务和推理路径比早期版本更完整，不过资源和许可条件需单独审查。
+若后续需要长期通过 Easel 自动生成音乐，优先评估 **ACE-Step 1.5**：歌曲和纯 BGM 都能做，模型 MIT 许可，官方直接提供异步 HTTP 服务，较适合目前独立媒体适配层。若主要做视频背景音乐，增加 **Stable Audio 3 Small Music** 对照试听；它有更轻的 CPU/GPU 路径，但权重许可有条件。完整人声歌曲还应将 **YuE2** 与 **MiniMax Music 3** 纳入试听：YuE2 特别适合需要乐谱规划、翻唱和编辑的个人创作者，但官方 NVIDIA 24GB 路径不适用于现有 AMD 环境，公司商用需另获授权。这里按接入和资源条件筛选，未作独立音质排名。
 
 未找到可直接承诺“长期免费、可商用、有稳定自动化 API”的主流在线服务。免费网页、试用额度、开放权重是三种不同条件；自行部署仍占用算力、内存、存储和运维时间。此结论不等于市场上完全不存在此类服务，而是本次一手资料不足以验证。
 
@@ -16,6 +16,7 @@
 | Suno Platform | 官方域名有音乐开发者平台和登录入口；未在公开页面核实免费 API 额度 | 不能再笼统说“没有官方 API”，也不能把网页积分用于 API。[官方平台](https://platform.suno.com/) |
 | Mubert Render | 免费 Ambassador 每月 25 首生成、5 次 MP3 下载，非商用，使用时需署名 | 偏 BGM 网页体验；API 单独提供，FAQ 将 API 试用与付费开通关联。[套餐](https://mubert.com/render/pricing)、[FAQ](https://mubert.com/render/faq) |
 | ACE Music / ACE-Step 官方 Space | ACE-Step README 宣传免费网页；另有官方 Hugging Face Demo | 可先试听，未核实该网页提供长期免费 API；Demo 的排队/额度不能当生产 SLA。[README](https://github.com/ace-step/ACE-Step-1.5)、[Space](https://huggingface.co/spaces/ACE-Step/Ace-Step-v1.5) |
+| YuE2 / NOIZ Demo | 官方链接免费在线体验；本次公开页面显示歌曲生成、识别歌词和翻唱各“3 left” | 未查到额度重置周期、账户适用条件或免费 API 合约，不能写成每天免费 3 首或无限调用。[Demo](https://yue.noizai.net/)、[官方入口](https://github.com/multimodal-art-projection/YuE) |
 | MiniMax 音乐 API | 自 2026-08-20 停止 Music-3.0-free、Music-2.6-free 和 music-cover-free；付费音乐 API 不再向新用户开放，已有付费用户可继续使用 | 网上旧“免费音乐 API”教程已经过时；官方建议网页体验或使用开放 Music 3 模型。[官方价格公告](https://platform.minimax.io/docs/pricing/overview) |
 
 ## 开放模型对比
@@ -23,6 +24,7 @@
 | 模型 | 用途 | 许可与商用 | 官方推理/接入路径 |
 | --- | --- | --- | --- |
 | ACE-Step 1.5 / XL | 完整人声歌、纯 BGM、参考音频、局部修改 | 官方权重标 MIT，可用于商用，保留许可声明；其他组件按各自许可 | 官方 HTTP 异步服务，适合直接写媒体适配器 |
+| YuE2-3B | 歌词与风格生成完整歌、符号乐谱规划、翻唱、编辑；官方另提供纯音乐工作流 | 代码 Apache-2.0；权重 CC BY-NC 4.0 加个人创作者许可，允许个人销售/商业发布输出，公司商用权重需授权 | 官方 Python/CLI；官方推荐 NOIZ YuE2-Turbo 异步 HTTP 服务，NVIDIA BF16 24GB 级路径 |
 | Stable Audio 3 Small Music / Medium | 优先作为音乐/BGM、音效和音频编辑候选；不是已验证的中文歌词逐字演唱服务 | 权重 Community 许可；符合年收入低于 100 万美元等条件的个人/小企业有免费商用许可；企业/API 提供方需审查对应授权和组件条款 | Python API、CLI、Gradio；本次未确认官方独立 REST 作业服务 |
 | MiniMax Music 3 | 最长约 5 分钟完整歌曲，歌词与风格分别输入 | Community 许可，允许符合条件的商业使用；需显示模型名，超过相关收入门槛需单独书面授权 | SGLang-Omni `/v1/audio/speech`；Diffusers 与 ComfyUI 路径 |
 | 腾讯 SongGeneration / LeVo 2 | 中文/英文歌曲、纯 BGM、纯人声及分轨 | 仓库许可证明确限学术/研究/教育，禁止商业或生产用途 | 推理脚本和 Gradio，需额外服务封装 |
@@ -36,6 +38,18 @@
 低显存资料明确：≤4GB 档要禁用 LM、INT8 量化并 CPU/DiT 卸载；6–8GB 可选择 0.6B LM；XL 约需至少 12GB 配合激进卸载/量化，20GB 以上更合适。低显存可运行不代表完整模块常驻，也不代表能与已有模型同时运行。项目有 CUDA、ROCm、MPS/MLX、CPU 路径，具体 AMD 型号兼容仍需实测。[官方显存分档](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/GPU_COMPATIBILITY.md)
 
 官方 REST 流程为 `POST /release_task` → `POST /query_result` → 下载返回的 `/v1/audio?path=...`；有健康检查、模型列表、队列和认证。请求支持提示词、歌词、时长及参考音频上传，结果可能将数组作为 JSON 字符串返回，需要适配解析。[官方 API 文档](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/API.md)
+
+### YuE2：补充重点候选
+
+**首次调研遗漏 YuE2，现补入主要候选**。当前官方仓库 `main` 已是 2026 年 9 月发布的 YuE2，旧 YuE 1 的代码和许可保留在 `YuE-v1` 分支，不能套用旧版资源和许可结论。YuE2-3B 可先产生旋律/和弦 ABC 乐谱，再生成歌曲，并支持谱面修改、参考歌曲转谱翻唱；官方纯音乐技能把人声旋律移入乐器声部，仍需试听是否漏出人声。基础运行要求 Linux、Python 3.12、支持 BF16 的 NVIDIA GPU、24GB 显存，输出 48kHz 双声道。[官方项目与新旧版本说明](https://github.com/multimodal-art-projection/YuE)
+
+权重不是简单 Apache 开源商用：`YuE2-3B`、两种 VAE 的许可证是 CC BY-NC 4.0，并额外允许以个人身份创作的用户、内容创作者和音乐人免费生成、发布、销售或向客户许可输出，无需模型方版税；生成作品署名可选，但分享权重仍需署名。此额外权限不授权公司商业使用权重，也不授权商业转卖权重，公司需联系作者；第三方素材权利仍由使用者自行处理。代码/文档/技能 Apache-2.0 与模型许可应分开记录。[完整模型许可](https://github.com/multimodal-art-projection/YuE/blob/main/MODEL_LICENSE)
+
+基础 Python 包的官方预热基准：RTX 4090 24GB 的完整规划模式，214.85 秒音频耗时 71.04 秒，峰值 11.18GiB；最大上下文测试峰值 14.08GiB。官方仍建议 24GB GPU 及至少 24GB 可用主机 RAM，不能据某个样例的 11GiB 就承诺小显存部署。模型卡描述旧 wheel 支持 Python 3.10+，当前 GitHub 快速开始使用 3.12；应按选定包/提交的安装要求复现。[官方模型卡与资源基准](https://huggingface.co/m-a-p/YuE2-3B#-speed-and-resources)
+
+官方推荐的 NOIZ **YuE2-Turbo** 保留相同模型权重与生成配方，提供 Bearer 认证、幂等任务提交 `POST /v1/jobs`、状态轮询、取消、FLAC/ABC 下载和翻唱上传接口，不需要另建 ComfyUI 包装。24GB 卡需降低并发或关闭常驻；默认按 32GB RTX 5090 调优。该卡预热后单请求官方 RTF 0.173，约为 60 秒音频耗时 10 秒；默认静态约 18GB、4 路负载峰值低于 25GB。数字不是 24GB/H20 或用户机器的实测承诺。[官方链接的 Turbo 实现、API 和资源说明](https://github.com/NoizAI/YuE2-Turbo)
+
+质量证据需审慎解释：作者 WildSongBench 的普通 YuE2 行是两次生成后筛选，best-of-8 行筛八次；不同指标排名不一，最高均值的小差距没有证明统计显著。不能据宣传直接写成“已证明音质超过 Suno”。适配前应在同一提示词/歌词、相同候选次数下，与 ACE-Step、MiniMax 进行中文歌试听。[官方评测协议](https://github.com/multimodal-art-projection/YuE#benchmarks)
 
 ### Stable Audio 3
 
@@ -66,7 +80,7 @@ Stable Audio Open 1.0 最长 47 秒双声道，Small 最长 11 秒且官方说�
 这是方案建议，尚未实施：
 
 1. 先试听 30–60 秒纯 BGM 和中文歌词歌各若干条，确认无意外人声、歌词准确性、音质和真实时长。
-2. 默认先采用模型官方服务；ACE-Step 已有任务提交/轮询/下载，不必为了接入额外部署 ComfyUI。Stable Audio 3 若入选，可以独立包装 HTTP 服务；Music 3 可用官方 SGLang 服务。
+2. 默认先采用模型官方服务；ACE-Step 已有任务提交/轮询/下载，不必为了接入额外部署 ComfyUI。YuE2 可评估官方推荐的 YuE2-Turbo 服务；Stable Audio 3 若入选，可以独立包装 HTTP 服务；Music 3 可用官方 SGLang 服务。
 3. 当前通用媒体适配层还没有 `music` 请求类型和适配器，音乐脚本仍走旧 provider。后续需扩展独立 `music` 适配器，在原音乐配置列表显示实例；统一请求至少包含提示词、歌词、纯音乐标志、时长、输出路径。具体模型参数留在适配层。
 4. `/v1/audio/speech` 只是 Music 3 使用的传输路径，不能因此把歌曲加入 TTS 配音频道。TTS 的逐句切分/拼接会破坏音乐结构，需音乐独立语义。
 5. 验收应记录实际模型、任务 ID、生成参数及音频时长，检查失败/超时/下载行为。HTTP 200 不等于音质、歌词或纯音乐要求已满足。
