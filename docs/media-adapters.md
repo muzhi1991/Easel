@@ -84,9 +84,9 @@
 
 ### macOS HTTP 传输
 
-默认 `httpx`；可显式选择 `curl`。本机观察到 Python 直接访问 LAN 返回 `Errno 65 No route to host`，而 `/usr/bin/curl` 同一端点可以正常访问，所以当前用户实例选择 `curl`。根因未进一步证实，不能据此说服务未部署或全网不可达。
+默认 `httpx`，当前用户实例也已恢复为 `httpx`（2026-10-09）；不再使用 curl 绕行。此前同一 Python 在系统 Terminal 中可访问 LAN，在 Paseo Agent 和内置终端中报 `Errno 65 No route to host`，系统 curl 则正常。Paseo 环境恢复后，Python TCP、HTTP 探活和真实 ASR/对齐均成功，确认应先检查启动进程链的局域网权限与 daemon 生命周期，而不是更改服务接口。现象与 Paseo [issue #6173](https://github.com/getpaseo/paseo/issues/6173) 相似，但本机未取得该报告中“已退出的 responsible process”证据，不将其具体根因写成已证实。
 
-`curl` 路径要求系统安装 curl。两种方式都支持 multipart，不自动重试上传、不跟随重定向；凭证通过 curl stdin 配置传入，不出现在进程命令参数中。其他机器优先测试 httpx，不需要沿用本机传输选择。
+`curl` 仍是可显式选择的传输方式，要求系统安装 curl；不会自动 fallback 到它。两种方式都支持 multipart，不自动重试上传、不跟随重定向；凭证通过 curl stdin 配置传入，不出现在进程命令参数中。迁移时优先使用 httpx，不需要沿用旧绕行配置。配置变更在下一次任务读取，无需重启服务。
 
 ## 使用与字幕行为
 
@@ -229,3 +229,10 @@ cd web/frontend && npm run build
 - 共享字幕脚本通过默认组合接口生成正确SRT；已有字幕优先回归通过。
 - 浏览器验证同一表格显示“自带字幕”及默认内网实例，编辑只有一个Base URL、粒度与1900秒超时；添加表单、连接探活正常，无页面脚本错误。Web重启后localhost和LAN可访问。
 - 验证产物 `/tmp/easel-gateway-validation/` 为本地临时文件，不提交；未改动远端两个模型服务、网关部署方式或共享OpenClaw。
+
+### 恢复 Python 直连验证（2026-10-09）
+
+- 默认实例 `internal-qwen-asr` 的 `transport` 从 `curl` 改为 `httpx`，其他设置保持不变；变更前配置备份在用户配置目录的 `media-providers.before-python-transport-20261009.json`，权限0600，不提交 Git。
+- 当前 Agent 环境 Python 到转写网关的 TCP 连接三次成功，统一入口探活成功；实际传输对象为 `httpx.Client`。
+- 经默认统一入口重新转写4.204秒中文样本，正确识别“甚至出现交易几乎停滞的情况。”，13个对齐单位、1段字幕，`timestamp_source=forced_alignment`、`approx_timeline=false`，时间戳在音轨范围内，无警告。
+- 结果 `/tmp/easel-asr-httpx-validation/chinese.json` 为本地临时产物。此次仅调整实例传输配置和维护说明，无需重新安装适配包或重启 Web/Gateway，未改动远端服务。
