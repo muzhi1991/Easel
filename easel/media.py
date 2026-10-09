@@ -29,6 +29,12 @@ def transcribe(source: Path, *, language: str = "auto", provider: str | None = N
                             TranscriptionRequest(Path(source), language, model, max_line_chars), provider)
 
 
+def recognize_text(source: Path, *, provider: str | None = None) -> dict:
+    rt = runtime()
+    from easel_media_adapters import OCRRequest
+    return rt.submit("ocr", "recognize_text", OCRRequest(Path(source)), provider)
+
+
 def video_provider(provider: str | None = None) -> tuple[dict, dict]:
     instance, adapter = runtime().resolve("video", provider)
     describe = getattr(adapter, "capabilities", None)

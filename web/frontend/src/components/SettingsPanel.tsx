@@ -15,11 +15,12 @@ import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcon
 interface Props { onClose: () => void; }
 
 type Sec = 'model' | 'env' | 'more';
-type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music';
+type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music' | 'ocr';
 
 const CHANNELS: { id: Chan; label: string }[] = [
   { id: 'chat', label: '对话与脚本' },
   { id: 'transcribe', label: '语音转写' },
+  { id: 'ocr', label: '文字识别' },
   { id: 'speech', label: '配音' },
   { id: 'image', label: '生图' },
   { id: 'video', label: '视频' },
@@ -587,14 +588,14 @@ export default function SettingsPanel({ onClose }: Props) {
             <button
               className="btn btn-sm btn-primary"
               onClick={() => void saveCurrent()}
-              disabled={saving || sec !== 'model' || chan === 'transcribe'}
+              disabled={saving || sec !== 'model' || (chan === 'transcribe' || chan === 'ocr')}
             >
               {saving ? '保存中…' : '保存配置'}
             </button>
             <button
               className="btn btn-sm"
               onClick={() => void doSelftest(sec === 'model' ? chan : 'all')}
-              disabled={testing || (sec === 'model' && chan === 'transcribe')}
+              disabled={testing || (sec === 'model' && (chan === 'transcribe' || chan === 'ocr'))}
             >
               {testing ? '自测中…' : '全部自测'}
             </button>
@@ -605,7 +606,7 @@ export default function SettingsPanel({ onClose }: Props) {
         <div className="settings-body">
           <nav className="settings-nav">
             <button className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
-              <IconSlidersHorizontal size={16} />模型配置<small>六个通道</small>
+              <IconSlidersHorizontal size={16} />模型配置<small>七个通道</small>
             </button>
             <button className={`snav${sec === 'env' ? ' active' : ''}`} onClick={() => setSec('env')}>
               <IconPackage size={16} />环境安装<small>{total ? (okCount === total ? '全就绪' : `${okCount}/${total}`) : '…'}</small>
@@ -702,6 +703,14 @@ export default function SettingsPanel({ onClose }: Props) {
                     </div>
                     <MediaProviders channel="transcribe" builtInRows={transRows.filter((r) => !r.slot)} />
                     <div className="foot-note">每行单独保存，下一次任务生效。连接探活不代表识别质量；不自动下载或回退 Whisper。Whisper 仅可通过命令行手动选择。</div>
+                  </section>
+                )}
+
+                {chan === 'ocr' && (
+                  <section className="st-panel active">
+                    <div className="panel-top"><span className="desc">提取图片文字、位置和置信度；画面理解仍使用图片模型</span></div>
+                    <MediaProviders channel="ocr" />
+                    <div className="foot-note">每行单独保存，下一次任务生效。探活仅检查连接；暂不支持 PDF 和视频直接输入。</div>
                   </section>
                 )}
 
