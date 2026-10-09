@@ -9,6 +9,7 @@ Agnes 没有 /images/edits 与 /images/variations：文生图 / 图生图 / 变�
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,69 @@ def env(tmp_path, monkeypatch):
 
 def _out(tmp_path) -> str:
     return str(tmp_path / "out" / "img.png")
+
+
+@pytest.mark.parametrize("base,command", [
+    (OPENAI_BASE, "text2img"), (OPENAI_BASE, "img2img"),
+    (OPENAI_BASE, "variations"), (AGNES_BASE, "text2img"),
+])
+@pytest.mark.parametrize("timeout", [180, 1800])
+def test_sync_timeout_reaches_network(env, tmp_path, monkeypatch, base, command, timeout):
+    """Exercise the real JSON/multipart transport; long generation budgets reach urllib."""
+    _, png = env
+    monkeypatch.setenv("IMG_BASE_URL", base)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ai_image, "http_post", _REAL_HTTP_POST)
+    received = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return json.dumps({"data": [{"b64_json": "aGk="}]}).encode()
+
+    def open_request(request, budget):
+        received.append((request.full_url, budget))
+        return Response()
+
+    monkeypatch.setattr(ai_image, "_open", open_request)
+    argv = [command, "--output", _out(tmp_path)]
+    if command != "variations":
+        argv += ["--prompt", "cat"]
+    if command != "text2img":
+        argv += ["--image", str(png)]
+    if timeout != 180:
+        argv += ["--timeout", str(timeout)]
+    args = ai_image.parse_args(argv)
+    args.func(args)
+    assert len(received) == 1
+    assert received[0][1] == timeout
+    assert Path(_out(tmp_path)).read_bytes() == b"hi"
+
+
+_REAL_HTTP_POST = ai_image.http_post
+
+
+def test_sync_timeout_does_not_resubmit(env, tmp_path, monkeypatch):
+    monkeypatch.setenv("IMG_BASE_URL", OPENAI_BASE)
+    monkeypatch.setattr(ai_image, "http_post", _REAL_HTTP_POST)
+    attempts = []
+
+    def timeout(request, budget):
+        attempts.append(request)
+        raise TimeoutError()
+
+    monkeypatch.setattr(ai_image, "_open", timeout)
+    args = ai_image.parse_args(["text2img", "--prompt", "cat", "--timeout", "1800",
+                               "--output", _out(tmp_path)])
+    with pytest.raises(SystemExit):
+        args.func(args)
+    assert len(attempts) == 1
+    assert not Path(_out(tmp_path)).exists()
 
 
 # ── provider 检测 ─────────────────────────────────────────
