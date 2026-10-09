@@ -806,11 +806,11 @@ export interface ModelSaveResponse extends ModelChannelsResponse {
   note?: string;
 }
 
-export function saveModelConfig(channel: string, rows: ModelSaveRow[]): Promise<ModelSaveResponse> {
+export function saveModelConfig(channel: string, rows: ModelSaveRow[], expectedPrimary?: string): Promise<ModelSaveResponse> {
   return request('/api/settings/models/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ channel, rows }),
+    body: JSON.stringify({ channel, rows, expectedPrimary }),
   });
 }
 
@@ -860,6 +860,8 @@ export interface LocalAgentInfo {
   configProvider?: string | null;
   supported: boolean;
   configured: boolean;
+  active?: boolean;
+  currentModel?: string;
   usableWithoutKey: boolean;
   loginHint: string;
   models?: LocalAgentModel[];

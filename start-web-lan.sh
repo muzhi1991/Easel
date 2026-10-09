@@ -15,9 +15,13 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 config = json.loads((Path.home() / '.openclaw-easel/openclaw.json').read_text())
-provider = config['agents']['defaults']['model']['primary'].split('/', 1)[0]
-url = urlsplit(config['models']['providers'][provider]['baseUrl'])
-print(f'{url.scheme}://{url.netloc}')
+model = config.get('agents', {}).get('defaults', {}).get('model', {})
+primary = model if isinstance(model, str) else model.get('primary', '')
+provider = primary.split('/', 1)[0]
+url = urlsplit(config.get('models', {}).get('providers', {}).get(provider, {}).get('baseUrl', ''))
+# Native runtimes (Codex/Claude CLI) do not require an API provider URL.
+if url.scheme and url.netloc:
+    print(f'{url.scheme}://{url.netloc}')
 PYCONFIG
 )"
 fi

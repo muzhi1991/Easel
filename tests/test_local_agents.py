@@ -25,6 +25,12 @@ sys.path.insert(0, str(PROJECT_ROOT / "skills" / "shared" / "scripts"))
 
 import app as web  # noqa: E402
 from easel import local_agents as la  # noqa: E402
+from easel import codex_backend as cb  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_real_codex_discovery(monkeypatch):
+    monkeypatch.setattr(cb, "discover", lambda: {"supported": False, "models": [], "reason": "暂无底座后端"})
 
 
 # ---- 探测层 ----
@@ -296,3 +302,129 @@ def test_gemini_cli_catalog_real(tmp_path, monkeypatch):
     ids = {m["id"] for m in cat}
     assert "gemini-3.1-pro-preview" in ids
     assert len(cat) >= 5
+
+
+@pytest.fixture()
+def codex_ready(monkeypatch):
+    monkeypatch.setattr(la.shutil, 'which', lambda c: '/usr/bin/codex' if c == 'codex' else None)
+    monkeypatch.setattr(cb, 'discover', lambda: {
+        'supported': True, 'pluginPath': '/local/plugins/codex',
+        'models': [{'id': 'gpt-6.1-sol', 'name': 'GPT-6.1 Sol'}, {'id': 'gpt-6-astra', 'name': 'GPT-6 Astra'}],
+    })
+    monkeypatch.setattr(cb, '_check_login', lambda command: None)
+    monkeypatch.setattr(cb, '_validate', lambda path: None)
+
+
+def test_codex_enable_preserves_api_config_env_and_fallbacks(sandbox, codex_ready):
+    before = json.loads(sandbox.oc_file.read_text())
+    defaults = before['agents']['defaults']
+    defaults['model']['fallbacks'] = ['openai/m', 'other/glm']
+    defaults['modelPolicy'] = {'allow': ['openai/m', 'other/glm']}
+    defaults['models'] = {'openai/m': {'alias': 'glm', 'params': {'temperature': 0.2}}}
+    before['plugins'] = {'allow': ['brave'], 'entries': {'brave': {'enabled': True}}}
+    before['gateway'] = {'port': 12345}
+    sandbox.oc_file.write_text(json.dumps(before))
+    env = sandbox.env_file.read_bytes()
+    response = sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'})
+    assert response.status_code == 200, response.text
+    data = json.loads(sandbox.oc_file.read_text())
+    assert data['models']['providers']['easel-openai'] == before['models']['providers']['openai']
+    assert 'openai' not in data['models']['providers']
+    defaults = data['agents']['defaults']
+    assert defaults['model'] == {'primary': 'openai/gpt-6.1-sol', 'fallbacks': ['easel-openai/m', 'other/glm']}
+    assert defaults['models']['openai/gpt-6.1-sol']['agentRuntime']['id'] == 'codex'
+    assert defaults['models']['easel-openai/m']['alias'] == 'glm'
+    assert defaults['modelPolicy']['allow'] == ['easel-openai/m', 'other/glm', 'openai/gpt-6.1-sol']
+    assert data['plugins']['allow'] == ['brave', 'codex', 'openai']
+    assert data['plugins']['entries']['codex']['config']['appServer']['homeScope'] == 'user'
+    assert data['gateway'] == before['gateway']
+    assert sandbox.env_file.read_bytes() == env
+    assert json.loads(sandbox.oc_file.with_name('openclaw.json.bak-codex').read_text()) == before
+    row = response.json()['agent']
+    assert row['configured'] and row['active'] and row['currentModel'] == 'gpt-6.1-sol'
+    snapshot = sandbox.oc_file.read_bytes()
+    assert sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'}).status_code == 200
+    assert sandbox.oc_file.read_bytes() == snapshot
+
+
+@pytest.mark.parametrize('failure', ['model', 'login', 'validation', 'conflict'])
+def test_codex_failures_do_not_write_config(sandbox, codex_ready, monkeypatch, failure):
+    def fail(*args):
+        raise ValueError('check failed')
+    if failure == 'login':
+        monkeypatch.setattr(cb, '_check_login', fail)
+    if failure == 'validation':
+        monkeypatch.setattr(cb, '_validate', fail)
+    if failure == 'conflict':
+        data = json.loads(sandbox.oc_file.read_text())
+        data['models']['providers']['easel-openai'] = {'baseUrl': 'https://different.example/v1'}
+        sandbox.oc_file.write_text(json.dumps(data))
+    before, env = sandbox.oc_file.read_bytes(), sandbox.env_file.read_bytes()
+    response = sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex', 'model': 'bad' if failure == 'model' else 'gpt-6.1-sol'})
+    assert response.status_code == 400
+    assert sandbox.oc_file.read_bytes() == before
+    assert sandbox.env_file.read_bytes() == env
+    assert not list(sandbox.oc_file.parent.glob('.codex-config-*'))
+
+
+def test_codex_save_legacy_slot_does_not_recreate_openai_override(sandbox, codex_ready, monkeypatch):
+    sandbox.env_file.write_text('OPENAI_BASE_URL=https://x/v1\nOPENAI_MODEL=m\nOPENAI_API_KEY=k\n')
+    assert sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'}).status_code == 200
+    monkeypatch.setattr(web, '_valid_base_url', lambda value: True)
+    rows = sandbox.get('/api/settings/models').json()['channels']['chat']['rows']
+    legacy = next(row for row in rows if row['slot'] == 'openai')
+    assert legacy['role'] == '备'
+    assert not any(row.get('name') == 'easel-openai' for row in rows)
+    body = {'channel': 'chat', 'expectedPrimary': 'openai/gpt-6.1-sol',
+            'rows': [{'slot': 'openai', 'model': 'm', 'baseUrl': 'https://x/v1', 'primary': False}]}
+    response = sandbox.post('/api/settings/models/save', json=body)
+    assert response.status_code == 200, response.text
+    data = json.loads(sandbox.oc_file.read_text())
+    assert 'openai' not in data['models']['providers']
+    assert data['agents']['defaults']['model']['primary'] == 'openai/gpt-6.1-sol'
+    body['rows'][0]['primary'] = True
+    assert sandbox.post('/api/settings/models/save', json=body).status_code == 200
+    assert json.loads(sandbox.oc_file.read_text())['agents']['defaults']['model']['primary'] == 'easel-openai/m'
+    codex = next(row for row in sandbox.get('/api/settings/local-agents').json()['agents'] if row['id'] == 'codex')
+    assert codex['configured'] and not codex['active']
+
+
+def test_codex_stale_settings_save_cannot_change_primary(sandbox, codex_ready):
+    assert sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'}).status_code == 200
+    before, env = sandbox.oc_file.read_bytes(), sandbox.env_file.read_bytes()
+    response = sandbox.post('/api/settings/models/save', json={
+        'channel': 'chat', 'expectedPrimary': 'openai/m',
+        'rows': [{'slot': 'openai', 'model': 'm', 'primary': True}],
+    })
+    assert response.status_code == 409
+    assert sandbox.oc_file.read_bytes() == before and sandbox.env_file.read_bytes() == env
+
+
+def test_codex_concurrent_write_is_not_overwritten(sandbox, codex_ready, monkeypatch):
+    def concurrent_write(path):
+        data = json.loads(sandbox.oc_file.read_text())
+        data['gateway'] = {'port': 43210}
+        sandbox.oc_file.write_text(json.dumps(data))
+    monkeypatch.setattr(cb, '_validate', concurrent_write)
+    response = sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'})
+    assert response.status_code == 400
+    data = json.loads(sandbox.oc_file.read_text())
+    assert data['gateway']['port'] == 43210
+    assert data['agents']['defaults']['model']['primary'] == 'openai/m'
+
+
+def test_new_codex_install_keeps_future_api_settings_separate(sandbox, codex_ready, monkeypatch):
+    data = json.loads(sandbox.oc_file.read_text())
+    data['models']['providers'].clear()
+    sandbox.oc_file.write_text(json.dumps(data))
+    assert sandbox.post('/api/settings/local-agents/enable', json={'id': 'codex'}).status_code == 200
+    monkeypatch.setattr(web, '_valid_base_url', lambda value: True)
+    response = sandbox.post('/api/settings/models/save', json={
+        'channel': 'chat', 'expectedPrimary': 'openai/gpt-6.1-sol',
+        'rows': [{'slot': 'openai', 'model': 'glm', 'baseUrl': 'https://new.example/v1', 'key': 'test-key'}],
+    })
+    assert response.status_code == 200, response.text
+    data = json.loads(sandbox.oc_file.read_text())
+    assert 'openai' not in data['models']['providers']
+    assert data['models']['providers']['easel-openai']['models'][0]['id'] == 'glm'
+    assert data['agents']['defaults']['model']['primary'] == 'openai/gpt-6.1-sol'
