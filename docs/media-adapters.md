@@ -468,3 +468,11 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 保留原生 FLAC、ABC（cot!=off）、`.music.json` 元数据、`.job.json` 恢复记录；指定 MP3/WAV/M4A 时额外用 FFmpeg 转码。下载有大小限制，检查 FLAC 标识、真实音轨、完整解码及服务报告时长，再检查转码结果；不能把 HTTP200 或下载文件存在作为歌曲成功。
 
 本轮隔离测试覆盖原生下载、转码、截断、错误、凭证、恢复和切换默认值；真实服务 seed=2026100920 作业 d9fdd4bc3d2a432f9541e15835d877c0 生成42.60秒48kHz双声道中文歌词歌曲，调用约20.69秒。音频技术校验通过不等同于人工音质评价。
+
+
+### 本轮运行验收（2026-10-09）
+
+- 分支 `feature/yue2-music` 验证后合并到运行 `dev`；适配包升级至0.5.0，重启 Web，仅同步 ai-music 技能。主 OpenClaw和 Easel Gateway无需为此次 CLI 接线重启。
+- 用户配置新增 `internal-yue2`、defaults.music；转写、视频、OCR、配音默认值保留。凭证只在本机 `.env`，配置/环境备份保存在用户配置目录，不提交。页面原音乐列表显示新实例、默认与“连接正常”；localhost/LAN均200。
+- 全套测试500 passed/3 skipped；115技能契约、269文档命令验证与 TypeScript/Vite构建通过。
+- 新 Agent session `29e9fef2-9d31-4966-a3cb-50125b72d9cb` status=ok，约89.9秒完成整轮写歌词、生成及自检。作业 `87ca6fc987244c72850fff2dd87d25da` succeeded，原生 FLAC 42.678667秒、48000Hz、双声道；abc/semantic均未截断，后端报告 torch。产物 `outputs/YuE2对话验收/`，结果 `/tmp/easel-yue2-agent-check.json`；页面截图 `/tmp/easel-yue2-settings.png`。这些本机验收产物不进入 Git，不宣称人工试听已通过。
