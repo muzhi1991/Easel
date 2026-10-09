@@ -47,6 +47,23 @@ def generate_video(prompt: str, output: Path, *, provider: str | None = None, **
     return rt.submit("video", "generate_video", VideoRequest(prompt, Path(output), **options), provider)
 
 
+def generate_speech(text: str, output: Path, *, provider: str | None = None,
+                    voice: str | None = None, language: str | None = None,
+                    instructions: str | None = None) -> dict:
+    rt = runtime()
+    from easel_media_adapters import SpeechRequest
+    return rt.submit("speech", "generate_speech",
+                     SpeechRequest(text, Path(output), voice, language, instructions), provider)
+
+
+def speech_voices(provider: str | None = None) -> list[str]:
+    instance, adapter = runtime().resolve("speech", provider)
+    method = getattr(adapter, "voices", None)
+    if not method:
+        raise RuntimeError("此语音供应商不支持音色查询")
+    return method(instance)
+
+
 def write_transcript(result: dict, path: Path) -> None:
     """Never leave a partial transcript if recognition/alignment fails."""
     path.parent.mkdir(parents=True, exist_ok=True)
