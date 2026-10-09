@@ -1346,9 +1346,12 @@ def _mask_key(v: str) -> str:
 def _model_channels() -> dict:
     env = _read_env()
     primary = ""
+    openai_slot = "openai"
     try:
         oc = _oc_config_path()
         if oc.is_file():
+            from easel.codex_backend import openai_slot_provider
+            openai_slot = openai_slot_provider(json.loads(oc.read_text(encoding="utf-8")))
             primary = str(json.loads(oc.read_text(encoding="utf-8"))
                           .get("agents", {}).get("defaults", {}).get("model", {}).get("primary", ""))
     except Exception:  # noqa: BLE001
@@ -1360,11 +1363,11 @@ def _model_channels() -> dict:
     ok_key = bool((env.get("OPENAI_API_KEY") or "").strip())
     if ob or ok_key:
         chat_rows.append({
-            "slot": "openai", "order": 1, "name": "deepseek",
-            "sub": "官方直连",
+            "slot": "openai", "order": 1, "name": "OpenAI 兼容接口",
+            "sub": "API 供应商",
             "type": "openai", "model": om or "deepseek-chat",
             "baseUrl": ob, "keyMasked": _mask_key(env.get("OPENAI_API_KEY", "")),
-            "role": "主" if primary.startswith("openai/") else "备",
+            "role": "主" if primary.startswith(f"{openai_slot}/") else "备",
             "result": "已配置" if ok_key else "缺 key",
         })
     ab = (env.get("ANTHROPIC_BASE_URL") or "").strip()
@@ -1393,7 +1396,7 @@ def _model_channels() -> dict:
             provs = (json.loads(oc.read_text(encoding="utf-8"))
                      .get("models", {}).get("providers", {})) or {}
             for pkey, pv in provs.items():
-                if pkey in ("openai", "anthropic", "relay") or not isinstance(pv, dict):
+                if pkey in RESERVED_PROVIDER_KEYS or not isinstance(pv, dict):
                     continue
                 models = pv.get("models") if isinstance(pv.get("models"), list) else []
                 mid = models[0].get("id", "") if models and isinstance(models[0], dict) else ""
@@ -1561,7 +1564,7 @@ def _write_env_direct(updates: dict[str, str]) -> None:
     tmp.replace(ENV_FILE)
 
 
-RESERVED_PROVIDER_KEYS = {"openai", "anthropic", "relay"}
+RESERVED_PROVIDER_KEYS = {"openai", "anthropic", "relay", "easel-openai"}
 
 
 def _openclaw_provider_creds() -> dict[str, tuple[str, str]]:
@@ -1688,12 +1691,21 @@ class ModelSaveRow(BaseModel):
 class ModelSaveRequest(BaseModel):
     channel: str = "chat"
     rows: list[ModelSaveRow] = Field(default_factory=list)
+    expectedPrimary: str | None = None
 
 
 @app.post("/api/settings/models/save")
 async def api_settings_models_save(req: ModelSaveRequest):
     """保存模型通道：.env 就地更新（key 留空=不改）；chat 同步 openclaw；媒体通道写 provider 配置。"""
     ch0 = (req.channel or "").strip()
+    if ch0 == "chat" and req.expectedPrimary is not None:
+        try:
+            model = json.loads(_oc_config_path().read_text(encoding="utf-8")).get("agents", {}).get("defaults", {}).get("model", {})
+            current = model if isinstance(model, str) else model.get("primary", "")
+        except (OSError, ValueError):
+            raise HTTPException(409, "无法读取当前模型，请刷新后重试")
+        if current != req.expectedPrimary:
+            raise HTTPException(409, "对话模型已在其他操作中切换，请重新打开设置后保存")
     if ch0 in ("speech", "image", "video", "music"):
         import model_registry as _mr2
         _gid0 = {"speech": "voice", "image": "image", "video": "video", "music": "music"}[ch0]
@@ -1758,6 +1770,11 @@ async def api_settings_models_save(req: ModelSaveRequest):
     is_chat = (req.channel or '').strip() == 'chat'
     _cur_env = _read_env()
     _cur_prov = _openclaw_provider_creds() if is_chat else {}
+    from easel.codex_backend import openai_slot_provider
+    try:
+        openai_slot = openai_slot_provider(json.loads(_oc_config_path().read_text(encoding="utf-8"))) if is_chat else "openai"
+    except (OSError, ValueError):
+        openai_slot = "openai"
     for row in req.rows:
         slot = (row.slot or '').strip()
         name = (row.name or '').strip().lower()
@@ -1785,8 +1802,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             if key:
                 updates['OPENAI_API_KEY'] = key
             if is_chat:
-                provider_updates['openai'] = {'model': model, 'base': base, 'key': key}
-                pkey = 'openai'
+                provider_updates[openai_slot] = {'model': model, 'base': base, 'key': key}
+                pkey = openai_slot
         elif slot == 'relay':
             if base:
                 updates['EASEL_LLM_BASE_URL'] = base
@@ -1861,7 +1878,7 @@ class LocalAgentEnableRequest(BaseModel):
 
 
 @app.get("/api/settings/local-agents")
-async def api_local_agents():
+def api_local_agents():
     """探测本机已装的 agent CLI（Claude Code / Gemini CLI / Codex…）。
 
     目的：装了 Claude Code / Gemini CLI 且已登录的用户**不需要再填 API Key** ——
@@ -1873,8 +1890,10 @@ async def api_local_agents():
 
 
 @app.post("/api/settings/local-agents/enable")
-async def api_local_agent_enable(req: LocalAgentEnableRequest):
-    """把一个本机 CLI agent（目前支持 claude-code / gemini-cli）接入 Easel。
+def api_local_agent_enable(req: LocalAgentEnableRequest):
+    """接入本机 Claude Code / Gemini CLI / Codex，并设为主模型。
+
+    Codex 使用独立的校验与原子写流程，不修改 .env。
 
     实现是把对应 provider 写进 openclaw.json（复用 _sync_anthropic_provider 的
     原子写套路）。CLI 登录态本身由 openclaw 的 auth store 管理 —— 这里只负责
@@ -1895,6 +1914,16 @@ async def api_local_agent_enable(req: LocalAgentEnableRequest):
     if not provider:
         raise HTTPException(400, f"{agent['label']} 暂无底座后端，无法免 key 接入")
     chosen = (req.model or "").strip()
+    if req.id == "codex":
+        from easel.codex_backend import enable
+        try:
+            note = enable(chosen)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except (OSError, subprocess.SubprocessError) as e:
+            raise HTTPException(503, "Codex 接入检查或配置保存失败，请检查本机安装后重试") from e
+        refreshed = next(a for a in detect_local_agents() if a["id"] == "codex")
+        return {"ok": True, "agent": refreshed, "note": note}
     catalog = catalog_for_provider(str(agent["openclawProvider"]))
     if provider == "claude-cli":
         # base 必须读 .env（不是 os.environ）：面板/.env 里配的中转站或自建网关值

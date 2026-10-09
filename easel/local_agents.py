@@ -7,7 +7,8 @@ Gemini CLI、Codex、OpenCode 这类 agent CLI，它们自己维护着登录态 
 OpenClaw（Easel 的底座）对其中两类有原生后端，会把 CLI 的登录态直接当成模型来源：
   * ``claude-cli``  ← Claude Code（anthropic 插件）
   * ``google-gemini-cli`` ← Gemini CLI（google 插件）
-其余 CLI（codex / opencode / qwen …）OpenClaw 目前没有内置 provider；探测出来是为了
+Codex 使用独立的 codex runtime 插件与 openai/* 模型，按本机插件能力探测。
+其余 CLI（opencode / qwen …）未接入；探测出来是为了
 在界面上如实展示「本机有什么、哪些能直接用」，而不是假装支持。
 
 设计上刻意与 AionUi 的「先探测后配置」一致：先告诉用户现成有什么，再谈要不要填 key。
@@ -42,11 +43,11 @@ KNOWN_AGENT_CLIS: tuple[dict[str, object], ...] = (
     },
     {
         "id": "codex",
-        "label": "Codex CLI",
+        "label": "Codex",
         "commands": ("codex",),
         "openclaw_provider": None,
         "config_provider": None,
-        "login_hint": "Codex CLI 登录态暂未被底座识别为模型来源，可用其自身命令直接使用。",
+        "login_hint": "复用本机 Codex 登录；选择 GPT 模型后接入，无需填写 API Key。",
     },
     {
         "id": "opencode",
@@ -162,6 +163,12 @@ def detect_local_agents() -> list[dict[str, object]]:
       login_hint            给用户的一句话说明
     """
     configured = _configured_providers()
+    try:
+        config = json.loads(_openclaw_config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        config = {}
+    default_model = config.get("agents", {}).get("defaults", {}).get("model", {})
+    primary = default_model if isinstance(default_model, str) else default_model.get("primary", "")
     out: list[dict[str, object]] = []
     for spec in KNOWN_AGENT_CLIS:
         found_cmd = ""
@@ -175,6 +182,18 @@ def detect_local_agents() -> list[dict[str, object]]:
         config_provider = spec.get("config_provider")
         installed = bool(found_path)
         is_configured = bool(config_provider) and config_provider in configured
+        extra = {"active": bool(provider and primary.startswith(f"{provider}/")),
+                 "currentModel": primary.split("/", 1)[-1] if provider and primary.startswith(f"{provider}/") else ""}
+        models = catalog_for_provider(provider)
+        hint = spec["login_hint"]
+        if spec["id"] == "codex" and installed:
+            from easel.codex_backend import discover, status
+            capability = discover()
+            provider = "openai" if capability["supported"] else None
+            models = capability["models"]
+            extra = status(config)
+            is_configured = extra.pop("configured")
+            hint = hint if capability["supported"] else capability["reason"]
         out.append({
             "id": spec["id"],
             "label": spec["label"],
@@ -187,9 +206,10 @@ def detect_local_agents() -> list[dict[str, object]]:
             "supported": provider is not None,
             "configured": is_configured,
             "usableWithoutKey": bool(installed and provider is not None),
-            "loginHint": spec["login_hint"],
+            "loginHint": hint,
             # 可选模型目录（有后端的 CLI 才有；空列表 = 前端退化为手填）。
-            "models": catalog_for_provider(provider),  # type: ignore[arg-type]
+            "models": models,
+            **extra,
         })
     return out
 

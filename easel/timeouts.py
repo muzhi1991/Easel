@@ -11,3 +11,4 @@
 TIMEOUT_PRODUCE = 7200   # 制作层：生视频 / 多镜合成给足时间
 TIMEOUT_DIRECT = 300     # 轻量直接执行层
 TIMEOUT_CHAT = TIMEOUT_PRODUCE   # chat 可能中途触发制作任务，按制作层预算
+TIMEOUT_LOCAL_AGENT_CONFIG = 25  # 本机 Agent 插件发现、登录检查、配置校验

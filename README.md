@@ -258,6 +258,8 @@ python3 -m playwright install chromium
 
 ## ⚙️ 配置说明
 
+已安装并登录本机 Codex 的用户，可在「设置 → 模型配置 → 对话 → 本机 Agent」选择 GPT 并一键接入，无需填写 OpenAI API Key。该入口通过 OpenClaw 的 Codex runtime 运行，不修改 `.env`；前置条件和配置边界见 [Codex 后端说明](docs/codex-backend.md)。
+
 最小配置只需要在项目根目录 `.env` 中提供一个可用的 LLM：
 
 ```bash

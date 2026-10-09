@@ -148,6 +148,7 @@ export default function SettingsPanel({ onClose }: Props) {
 
   // ── 模型配置（真值只读 + 真自测） ────────────────────────
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
+  const [chatPrimary, setChatPrimary] = useState('');
   const [transRows, setTransRows] = useState<ModelRow[]>([]);
   const [mediaRows, setMediaRows] = useState<Record<string, ModelRow[]>>({});
   const [modelLoading, setModelLoading] = useState(true);
@@ -191,7 +192,10 @@ export default function SettingsPanel({ onClose }: Props) {
     try {
       const d = await enableLocalAgent(id, model);
       setLocalAgentNote(d.note || '已接入');
-      setLocalAgents((as) => as.map((a) => (a.id === id ? { ...a, configured: true } : a)));
+      const [agents, channels] = await Promise.all([fetchLocalAgents(), fetchModelChannels()]);
+      setLocalAgents(agents.agents);
+      setChatRows(channels.channels.chat.rows || []);
+      setChatPrimary(channels.primary);
     } catch (e) {
       setLocalAgentNote(e instanceof Error ? e.message : '接入失败');
     } finally {
@@ -224,6 +228,7 @@ export default function SettingsPanel({ onClose }: Props) {
       .then((d) => {
         if (!alive) return;
         setChatRows(d.channels.chat.rows || []);
+        setChatPrimary(d.primary);
         setTransRows(d.channels.transcribe.rows || []);
         setMediaRows({
           image: d.channels.image?.rows || [],
@@ -283,9 +288,10 @@ export default function SettingsPanel({ onClose }: Props) {
     setSaving(true);
     setSavedNote('');
     try {
-      const d = await fetchWithRetry(() => saveModelConfig(chan, payload), 3, 20000);
+      const d = await fetchWithRetry(() => saveModelConfig(chan, payload, chan === 'chat' ? chatPrimary : undefined), 3, 20000);
       window.dispatchEvent(new Event('easel-media-config'));
       setChatRows(d.channels.chat.rows || []);
+      setChatPrimary(d.primary);
       setTransRows(d.channels.transcribe.rows || []);
       setMediaRows({
         image: d.channels.image?.rows || [],
@@ -294,6 +300,10 @@ export default function SettingsPanel({ onClose }: Props) {
         speech: d.channels.speech?.rows || [],
       });
       setSavedNote(d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
+      if (chan === 'chat') {
+        const agents = await fetchLocalAgents();
+        setLocalAgents(agents.agents);
+      }
       void refreshEnv();
     } catch (e) {
       setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
@@ -301,7 +311,7 @@ export default function SettingsPanel({ onClose }: Props) {
       setSaving(false);
       setTimeout(() => setSavedNote(''), 6000);
     }
-  }, [chan, chatRows, transRows, mediaRows, refreshEnv]);
+  }, [chan, chatRows, chatPrimary, transRows, mediaRows, refreshEnv]);
 
   // Esc 关闭
   useEffect(() => {
@@ -573,7 +583,7 @@ export default function SettingsPanel({ onClose }: Props) {
     )
   );
 
-  const chatOk = chatRows.length > 0 && !chatRows[0].result.includes('缺');
+  const chatOk = localAgents.some((a) => a.active) || chatRows.some((r) => r.role === '主' && r.result === '已配置');
 
   return (
     <div
@@ -590,7 +600,7 @@ export default function SettingsPanel({ onClose }: Props) {
             <button
               className="btn btn-sm btn-primary"
               onClick={() => void saveCurrent()}
-              disabled={saving || sec !== 'model' || (chan === 'transcribe' || chan === 'ocr')}
+              disabled={saving || !!enabling || sec !== 'model' || (chan === 'transcribe' || chan === 'ocr')}
             >
               {saving ? '保存中…' : '保存配置'}
             </button>
@@ -633,7 +643,7 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'chat' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '主通道在线' : '未配置'}</span>
+                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '主通道已配置' : '未配置'}</span>
                       <span className="desc">经本地网关路由（主备自动降级）</span>
                       {selftest && <span className="desc">上次自测 {hhmm(selftest.testedAt)}</span>}
                       <span className="spacer" />
@@ -654,25 +664,25 @@ export default function SettingsPanel({ onClose }: Props) {
                             本机 Agent
                             <span className="desc">
                               {usable.length
-                                ? `检测到可免 API Key 使用：${usable.map((a) => a.label).join('、')}`
+                                ? `可复用本机登录：${usable.map((a) => a.label).join('、')}`
                                 : '检测到的 CLI 暂无底座后端，仍需填 API Key'}
                             </span>
                           </div>
                           {shown.map((a) => (
                             <div className="la-row" key={a.id}>
                               <span className="la-name">{a.label}<small>{a.path || a.command}</small></span>
-                              <span className={`la-state ${a.configured ? 'ok' : a.supported ? 'todo' : 'na'}`}>
-                                {a.configured ? '已接入' : a.supported ? '可接入' : '暂不支持'}
+                              <span className={`la-state ${a.active || a.configured ? 'ok' : a.supported ? 'todo' : 'na'}`} title={a.currentModel || ''}>
+                                {a.active ? '已接入 · 使用中' : a.configured ? '已接入' : a.supported ? '可接入' : '暂不支持'}
                               </span>
                               <span className="la-act">
                                 {a.supported && (a.models?.length ?? 0) > 0 && (
                                   <select
                                     className="la-model"
-                                    value={laModels[a.id] ?? ''}
+                                    value={laModels[a.id] ?? a.currentModel ?? ''}
                                     title="选择该 agent 使用的模型"
                                     onChange={(e) => setLaModels((m) => ({ ...m, [a.id]: e.target.value }))}
                                   >
-                                    <option value="">默认模型</option>
+                                    <option value="">{a.id === 'codex' && a.models?.some((m) => m.id === 'gpt-6.1-sol') ? '默认 GPT-6.1 Sol' : '默认模型'}</option>
                                     {(a.models ?? []).map((m) => (
                                       <option key={m.id} value={m.id}>{m.name}</option>
                                     ))}
@@ -681,10 +691,10 @@ export default function SettingsPanel({ onClose }: Props) {
                                 {a.supported && (
                                   <button
                                     className="btn btn-sm"
-                                    disabled={enabling === a.id}
-                                    title={a.configured ? '重新应用所选模型（写入 openclaw.json 主模型）' : '写入 openclaw.json，免 API Key 接入'}
-                                    onClick={() => void doEnableAgent(a.id, laModels[a.id] ?? '')}
-                                  >{enabling === a.id ? '接入中…' : a.configured ? '应用模型' : '一键接入'}</button>
+                                    disabled={!!enabling || saving}
+                                    title="接入并设为当前对话模型"
+                                    onClick={() => void doEnableAgent(a.id, laModels[a.id] ?? a.currentModel ?? '')}
+                                  >{enabling === a.id ? '接入中…' : a.configured ? '使用此模型' : '一键接入'}</button>
                                 )}
                               </span>
                               <span className="la-hint">{a.loginHint}</span>
