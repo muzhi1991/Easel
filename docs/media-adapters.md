@@ -401,7 +401,7 @@ Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体
 
 现有 `voice_clone.py` 的 `fish-audio` 路径支持 `FISH_API_KEY`、`FISH_BASE_URL`、`FISH_TTS_MODEL`，模型参数优先级为 CLI `--model`、环境变量、默认 `s2.1-pro-free`。模型放 HTTP `model` header，而非音色 `reference_id`；未知模型名在本地拒绝，避免上游静默回退付费。设置页原 Fish 行显示模型选择，无新供应商列表。省略音色使用官方默认，也支持参考音频和已有音色 ID。
 
-用户账户网页显示每月 8,000 积分、最多 7 分钟，这是用户看到的页面额度；不能未经账户核实当作 API 免费模型额度。公开 API 文档把 `s2.1-pro-free` 标为零价、受公平使用限制，未公布固定总量或期限。网页订阅额度和 API 计费需分别确认。不宣称无限量或永久免费。密钥仅写本机 `.env`，不提交。
+用户账户网页显示每月 8,000 积分、最多 7 分钟，这是用户看到的页面额度；不能未经账户核实当作 API 免费模型额度。公开 API 文档把 `s2.1-pro-free` 标为零价、受公平使用限制，未公布固定总量；后续核查 Fish 官方公告称免费访问已延长至 2026 年 11 月，不是永久承诺（[公告](https://www.reddit.com/r/FishAudio_Official/comments/1wpo2hc/we_made_s21_pro_free_heres_how_we_cut_the_gpu_cost/)）。网页订阅额度和 API 计费需分别确认。不宣称无限量或永久免费。密钥仅写本机 `.env`，不提交。
 
 依据：[Fish API 快速开始](https://docs.fish.audio/developer-guide/getting-started/quickstart)、[TTS 模型 header](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[API 价格](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)。
 
@@ -435,3 +435,12 @@ SRT 是合成段真实帧数/采样率累积的句级字幕；不运行 ASR、�
 真实短句验收（隔离临时配置）：服务 `/models` 确認 1.7B CustomVoice，音色查询10项；显式 `serena` 和自然亲切指令生成两句中文，总时长4.56秒。WAV拼接转MP3后 ffprobe 同为4.56秒，SRT两段连续覆盖0–4.56秒。已有 Qwen ASR/对齐回读“欢迎收听千问配音测试，本次验证码是八三六二。”完整，与输入文字一致（标点有差异）。这只验证固定短样本，不代表所有音色、长文、情绪或并发性能。
 
 提交前验证：473 passed / 3 skipped；115 个技能契约、271 条命令校验通过；前端 tsc + Vite build 通过。
+
+
+### 部署与对话验收
+
+已合并至 dev，运行目录安装适配包0.4.0，Web更新 production bundle并重启；仅同步 tts-voiceover，未重启主OpenClaw、未修改远端服务、未执行全量workspace同步。speech默认实例为internal-qwen-tts、vivian、Chinese，自然亲切；旧VOICE_PROVIDER仍为fish-audio、s2.1-pro-free，以便明确 `--engine closed` 手动调用。其他媒体默认保持原值。用户配置备份 `~/.config/easel/media-providers.before-qwen-tts-20261009-170000.json`。
+
+新真实 Agent session `0956e0cb-2a85-46e8-824a-1d16ec7efab7`，status=ok、100.76秒（完整Agent耗时，不是模型生成速度），输出 `outputs/千问对话配音验收/agent.mp3` / `agent.srt` / `agent.tts.json`；provider=internal-qwen-tts、model=qwen3-tts、voice=vivian、音频5.2秒、两条字幕覆盖0–5.2秒。独立Qwen ASR回读“欢迎收听内网配音。今天的验证码是五九七四。”正确；对齐报告一单位零时长，不影响此处合成段字幕，未据此宣传逐字精度。CLI结果 `/tmp/easel-qwen-tts-agent.json`；真实素材及实例状态不进Git。
+
+Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fish为备/手动可选；点击Qwen探活显示连接正常。这里“备”不意味着自动降级链。localhost/LAN均200，pip check通过。当前音色字段可编辑为服务返回的名称，`tts.py voices` 可列出服务音色。

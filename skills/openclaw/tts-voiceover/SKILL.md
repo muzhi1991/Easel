@@ -10,7 +10,7 @@ layer: produce
 
 把文案 / 脚本合成为 AI 语音（口播、旁白、朗读）。共享脚本 `skills/shared/scripts/tts.py speak`：
 **默认顺序**：显式引擎/媒体实例 → 设置页配音默认媒体实例 → 旧 `VOICE_PROVIDER` → Edge。
-媒体实例失败就报错，不自动调用 Fish、Gemini 或 Edge。旧 closed 自动模式仍可能回退 Edge。
+媒体实例失败就报错，不自动调用 Fish、Gemini 或 Edge。未配置媒体默认时，旧云端 auto 路径失败仍可能回退 Edge；`--engine closed` 则明确报错。
 音色以该供应商设置为默认，`--voice vivian` 等显式参数可覆盖；不得混用 Edge/CosyVoice 音色名。
 内网 Qwen 当前仅 CustomVoice 预置音色和风格控制，不能通过 task_type 自动切换权重。
 
@@ -111,8 +111,8 @@ python skills/shared/scripts/video_ops.py bgm -i clip.mp4 -o clip_vo.mp4 \
 
 ## Profile 感知
 
-有 Profile 时可读取账号偏好音色 / 语速 / 平台调性（如口播偏活泼晓伊、
-知识类偏沉稳云扬）作为默认参数；无 Profile 退到通用默认（晓晓、正常语速）。
+有 Profile 时可读取平台调性；偏好音色必须属于当前供应商，不得把 Edge 音色传给内网服务。
+无 Profile 使用当前媒体实例的默认音色；明确选择 Edge 时才使用晓晓。
 
 ## 内网配音与手动选择
 
