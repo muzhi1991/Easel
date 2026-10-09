@@ -28,6 +28,11 @@ class TranscriptionRequest:
 
 
 @dataclass(frozen=True)
+class OCRRequest:
+    source: Path
+
+
+@dataclass(frozen=True)
 class VideoRequest:
     prompt: str
     output: Path
@@ -88,7 +93,8 @@ class MediaRuntime:
             from .qwen import QwenAdapter
             from .openai import OpenAITranscriptionAdapter
             from .h3 import H3Adapter
-            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter()}
+            from .rapidocr import RapidOCRAdapter
+            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter()}
             for entry in importlib.metadata.entry_points(group="easel.media_adapters"):
                 if entry.name not in adapters:
                     adapters[entry.name] = entry.load()()

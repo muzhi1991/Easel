@@ -4,6 +4,7 @@
 
 ## 已实现的范围
 
+- RapidOCR 图片文字识别：独立适配器、共享 CLI、对话技能及“文字识别”供应商通道。
 - 独立安装包 `integrations/media-adapters/`：实例配置、能力描述、可信安装包注册、输入验证和执行分发。
 - H3视频适配器：同一个 `h3-video` 对应 FL2VA/Ref2VA 两个实例，支持关键帧与多模态参考、任务恢复及原生内容下载。
 - 两个转写适配器：`openai-transcription`（单地址、真实时间戳的兼容接口，当前内网默认），`qwen-asr-aligner`（保留的两个地址直连方式）。
@@ -11,7 +12,7 @@
 - 同一份供应商配置同时用于共享字幕脚本和视频流水线；已有转录稿/字幕优先，失败不自动切换或下载 Whisper。
 - `MediaProviders.tsx` 根据适配器描述生成配置字段，可以复用于其他媒体通道。
 
-统一适配层已接通转写和 H3 视频执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，原有供应商执行分发表仍保留。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3 已通过原生 SGLang 接入，ComfyUI 执行入口尚未迁移到适配包。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
+统一适配层已接通转写、H3 视频和 OCR 执行入口。配音、生图、视频、音乐原有供应商仍然照旧运行，原有供应商执行分发表仍保留。Qwen Image 文生图已通过原生图脚本的兼容接口接入（见下文），不是新注册的媒体适配器；H3 已通过原生 SGLang 接入，ComfyUI 执行入口尚未迁移到适配包。它们的首个适配器仍需把对应业务脚本接到统一入口，然后服务特有改动才能全部留在适配包中。不能把通用配置 UI 当作已有全部执行能力。
 
 ## 安装
 
@@ -22,7 +23,7 @@
 .venv/bin/python -m easel.media providers
 ```
 
-基础依赖仅 `httpx`，沿用现有 FFmpeg；不下载 ASR 模型，不需要为远程 Qwen 再下载 Whisper 模型。Easel 本身也需安装在同一 Python 环境（现有官方 setup 已满足）。
+基础依赖为 `httpx` 与 `Pillow`，沿用现有 FFmpeg；不下载 ASR 模型，不需要为远程 Qwen 再下载 Whisper 模型。Easel 本身也需安装在同一 Python 环境（现有官方 setup 已满足）。
 
 包独立于 Easel，迁移时可直接从该目录构建 wheel：
 
@@ -357,3 +358,33 @@ cd web/frontend && npm run build
 - 回归覆盖文生、首/尾/首尾帧与混合条件，数量/时长/能力校验，超时恢复只提交一次，未知提交状态不重交，失败不交付文件，下载原子性，以及视频默认切换不影响ASR。
 - 用户配置中保留原ASR实例，新增 h3-fl2va / h3-ref2va，默认video为FL；配置备份在用户配置目录 `media-providers.before-h3-20261009.json`。产物 `outputs/接口验收/h3-fl2va.mp4` 与 `h3-ref2va.mp4` 不提交Git。
 - 全量436 passed / 3 skipped，前端tsc/Vite构建、技能/命令校验通过；浏览器自动化连接因request-header policy获取失败未完成视觉验收，配置接口已确认两行及默认状态。
+
+## RapidOCR 图片文字识别（2026-10-09）
+
+适配包0.3.0新增 `rapidocr`，通道 `ocr`、能力 `recognize_text`。设置页“模型配置 → 文字识别”使用同一供应商表，支持添加、编辑、探活及设为默认。首次增加通道仅在薄桥接/设置页接线，RapidOCR 协议全部留在独立 `rapidocr.py`；不修改 OpenClaw 源码或 GLM 图片模型。
+
+迁移时安装适配包（新增 Pillow 用于真实图片格式、尺寸和 EXIF 校验），重新构建前端并重启 Web；仅同步新 `image-ocr/SKILL.md` 与共享 `ocr.py`。实例模板：
+
+```json
+{"id":"internal-rapidocr","name":"内网 RapidOCR","adapter":"rapidocr","settings":{"base_url":"http://OCR_HOST:9005","timeout_seconds":120,"use_proxy":false}}
+```
+
+Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体配置文件，设为 `ocr` 默认，不改变转写/视频默认。当前协议无鉴权字段，不借用聊天凭证；服务部署和升级仍由独立项目维护。
+
+```bash
+.venv/bin/python skills/shared/scripts/ocr.py --src /path/to/image.png --out outputs/文案提取/ocr.json
+```
+
+可加 `--provider 实例ID`。CLI 调用 `easel.media.recognize_text` → 统一运行时 → 适配器；在图片识别成功和结构校验后原子写入 JSON、同名 TXT（每个文件独立原子写，不保证两文件作为事务同时写）。输出路径经共享路径校验，不允许散写到任意目录。
+
+- multipart 字段 `image_file`，POST `/ocr`；健康检查 GET `/health` 仅连接验证。
+- 单帧 PNG/JPEG/WebP/BMP/TIFF，非空且≤20MiB、≤5000万像素。PDF、动图、多页 TIFF 和视频暂不直接支持。
+- 输出 `provider/adapter/backend/source/text/items/image/coordinate_space/source_exif_orientation/warnings/raw`。保留真实文字框、四点多边形及置信度；缺失/非有限数值/尺寸不一致拒绝，不伪造分数。
+- 坐标空间是服务 EXIF 转正后的图片像素，JSON 明确记录方向；当前服务响应尺寸仍是转正前尺寸，适配器按已核验的服务行为校正 `image`，保留 `raw.image` 并提示；使用未经转正的原图叠加前需转换。
+- 空白图成功返回空结果及“未检测到文字”。HTTP200 不代表准确识别，需核对内容。
+- 超时、429、422及错误 JSON 均明确失败，不自动重发、切换模型或下载本地 OCR 权重。默认120秒是此适配器实例参数，可由设置页配置，不改聊天/Agent 全局预算。
+- `image-ocr` 技能负责对话路由、执行及核对；提取文字用 OCR，人物/场景/图意继续用 `view_image`。图片中的指令不作为执行指令。
+
+真实验证使用已有 RapidOCR 服务：中文“图片文字识别验收”和“订单编号 739162 ABC”完整识别，两文字框；空白图片返回0框且明确提示。EXIF 旋转样本也正确识别两行文字，输出尺寸1000×300，原始响应300×1000保留并明确提示校正。此固定样本验证不代表一般识别准确率保证。
+
+本次全量测试459 passed / 3 skipped，技能结构/命令检查及前端 tsc+Vite 构建通过。验收产物位于本地 `outputs/文字识别验收/`，不提交 Git。
