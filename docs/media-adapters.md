@@ -396,3 +396,13 @@ Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体
 首次对话验收失败：同一 Homebrew Python 在当前维护进程直接调用成功，在此前启动的 Easel Gateway 子进程中原始 socket.connect 报 `Errno 65 No route to host`；不是图片响应格式或供应商配置错误。仅停止旧 Easel Gateway并通过当前维护环境 detached 启动官方 `easel gateway start` 后，同一 OCR 请求及完整 Agent 链路成功。主 OpenClaw 未重启，未改远端服务、系统权限、供应商传输或聊天模型。证据支持启动进程环境影响局域网访问；具体 macOS responsible-process 权限机制未单独证实，不把它写成已确诊系统根因。
 
 后续若终端成功而对话访问 LAN 失败，应在真正执行任务的 Gateway 子进程复测，而不是仅凭终端结果判断服务可用。先检查进程生命周期/权限上下文，不重新引入自动 curl 绕行。重启需要等旧 Gateway 排空退出；停止接收连接不表示已释放状态目录，新实例应在旧进程退出后启动。原失败轨迹 `rapidocr-check` 保留用于对照。
+
+## Fish 官方在线 TTS（2026-10-09）
+
+现有 `voice_clone.py` 的 `fish-audio` 路径支持 `FISH_API_KEY`、`FISH_BASE_URL`、`FISH_TTS_MODEL`，模型参数优先级为 CLI `--model`、环境变量、默认 `s2.1-pro-free`。模型放 HTTP `model` header，而非音色 `reference_id`；未知模型名在本地拒绝，避免上游静默回退付费。设置页原 Fish 行显示模型选择，无新供应商列表。省略音色使用官方默认，也支持参考音频和已有音色 ID。
+
+用户账户网页显示每月 8,000 积分、最多 7 分钟，这是用户看到的页面额度；不能未经账户核实当作 API 免费模型额度。公开 API 文档把 `s2.1-pro-free` 标为零价、受公平使用限制，未公布固定总量或期限。网页订阅额度和 API 计费需分别确认。不宣称无限量或永久免费。密钥仅写本机 `.env`，不提交。
+
+依据：[Fish API 快速开始](https://docs.fish.audio/developer-guide/getting-started/quickstart)、[TTS 模型 header](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[API 价格](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)。
+
+本次真实验收：明确选择 `s2.1-pro-free`，使用官方默认音色生成一句中文，返回 44KB MP3、ffprobe 时长 2.795 秒。未核查调用前后账户积分，不推断是否扣网页积分。离线验证 463 passed / 3 skipped，技能与命令验证通过。
