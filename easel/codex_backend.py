@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.openclaw_workspace import config_path
-from easel.timeouts import TIMEOUT_LOCAL_AGENT_CONFIG
+from easel.timeouts import TIMEOUT_LOCAL_AGENT_CONFIG, TIMEOUT_LOCAL_AGENT_INSTALL
 
 LEGACY_OPENAI_PROVIDER = "easel-openai"
 DEFAULT_MODEL = "gpt-6.1-sol"
@@ -29,7 +30,7 @@ def _inspect(plugin: str, *, main: bool = False) -> dict:
     env.pop("OPENCLAW_PROFILE", None)
     try:
         result = subprocess.run(openclaw_base_cmd() + ["plugins", "info", plugin, "--json"],
-                                env=env, capture_output=True, text=True,
+                                env=env, cwd=home, capture_output=True, text=True,
                                 timeout=TIMEOUT_LOCAL_AGENT_CONFIG)
         return json.loads(result.stdout).get("plugin", {}) if result.returncode == 0 else {}
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -37,7 +38,7 @@ def _inspect(plugin: str, *, main: bool = False) -> dict:
 
 
 def discover() -> dict:
-    """Only reuse a locally registered official plugin; never install from the network."""
+    """Discover a trusted official installation to reuse or install in this profile."""
     global _discovery_cache
     key = str(config_path())
     if _discovery_cache and _discovery_cache[1] == key and time.monotonic() - _discovery_cache[0] < 60:
@@ -46,10 +47,10 @@ def discover() -> dict:
     if not shutil.which("codex") or not shutil.which("openclaw"):
         return result
     plugin = _inspect("codex")
-    if not plugin:
+    if not plugin.get("trustedOfficialInstall"):
         plugin = _inspect("codex", main=True)
     root = Path(plugin.get("rootDir") or "/nonexistent")
-    if plugin.get("id") == "codex" and plugin.get("packageName") == "@openclaw/codex" and root.is_dir():
+    if plugin.get("trustedOfficialInstall") and plugin.get("id") == "codex" and plugin.get("packageName") == "@openclaw/codex" and root.is_dir():
         provider = _inspect("openai")
         manifest = Path(provider.get("rootDir") or "/nonexistent") / "openclaw.plugin.json"
         try:
@@ -57,7 +58,7 @@ def discover() -> dict:
             models = [{"id": m["id"], "name": m.get("name") or m["id"]}
                       for m in catalog if isinstance(m.get("id"), str) and m["id"].startswith("gpt-")]
             if models:
-                result = {"supported": True, "models": models, "pluginPath": str(root), "reason": ""}
+                result = {"supported": True, "models": models, "pluginPath": str(root), "pluginVersion": plugin.get("packageVersion", ""), "reason": ""}
         except (OSError, ValueError, KeyError, TypeError):
             result["reason"] = "无法读取 OpenClaw 的 GPT 模型目录，请检查 OpenAI 插件"
     _discovery_cache = (time.monotonic(), key, result)
@@ -128,7 +129,7 @@ def _validate(path: Path) -> None:
     env = os.environ.copy()
     env.update(OPENCLAW_CONFIG_PATH=str(path), OPENCLAW_STATE_DIR=str(config_path().parent))
     result = subprocess.run(openclaw_base_cmd() + ["config", "validate", "--json"],
-                            env=env, capture_output=True, text=True,
+                            env=env, cwd=config_path().parent, capture_output=True, text=True,
                             timeout=TIMEOUT_LOCAL_AGENT_CONFIG)
     # Do not return CLI stderr: it can include provider credentials.
     try:
@@ -139,57 +140,36 @@ def _validate(path: Path) -> None:
         raise ValueError("OpenClaw 拒绝 Codex 配置，未保存；请检查插件与 OpenClaw 版本兼容性")
 
 
-def enable(model: str = "") -> str:
-    discovery = discover()
-    if not discovery["supported"]:
-        raise ValueError(discovery["reason"])
-    ids = [m["id"] for m in discovery["models"]]
-    chosen = model or (DEFAULT_MODEL if DEFAULT_MODEL in ids else ids[0])
-    if chosen not in ids:
-        raise ValueError("所选模型不在本机 OpenClaw 的 GPT 可选目录中")
-    command = shutil.which("codex")
-    if not command:
-        raise ValueError("未找到本机 Codex")
-    _check_login(command)
-    path = config_path()
-    raw = path.read_bytes()
-    data = json.loads(raw)
-    _move_legacy_provider(data)
-    plugins = data.setdefault("plugins", {})
-    if plugins.get("enabled") is False:
-        raise ValueError("OpenClaw 已全局禁用插件，请先启用插件功能")
-    for plugin_id in ("codex", "openai"):
-        plugins.setdefault("entries", {}).setdefault(plugin_id, {})["enabled"] = True
-        if isinstance(plugins.get("allow"), list) and plugin_id not in plugins["allow"]:
-            plugins["allow"].append(plugin_id)
-        if plugin_id in plugins.get("deny", []):
-            plugins["deny"].remove(plugin_id)
-    paths = plugins.setdefault("load", {}).setdefault("paths", [])
-    if discovery["pluginPath"] not in paths:
-        paths.append(discovery["pluginPath"])
-    config = plugins["entries"]["codex"].setdefault("config", {})
-    config.setdefault("sessionCatalog", {})["enabled"] = False
-    app_server = config.setdefault("appServer", {})
-    if app_server.get("transport", "stdio") != "stdio":
-        raise ValueError("已有远程 Codex 接入配置，不能用本机接入覆盖它")
-    app_server.update(command=command, homeScope="user")
+def _scope_api_params(data: dict, codex_ref: str) -> None:
+    """Global API request params disqualify Codex; preserve them on existing API models."""
     defaults = data.setdefault("agents", {}).setdefault("defaults", {})
-    # An agent-level override would otherwise make a successful save ineffective.
-    for entry in data["agents"].get("list", []):
-        if entry.get("id") == "main" and entry.get("model"):
-            raise ValueError("main Agent 设置了独立模型，请先移除该覆盖再使用一键接入")
-    ref = f"openai/{chosen}"
-    defaults.setdefault("models", {}).setdefault(ref, {}).setdefault("agentRuntime", {})["id"] = "codex"
-    primary = defaults.get("model", {})
-    if isinstance(primary, str):
-        primary = {"primary": primary}
-    primary["primary"] = ref
-    defaults["model"] = primary
-    allow = defaults.get("modelPolicy", {}).get("allow")
-    if isinstance(allow, list) and ref not in allow:
-        allow.append(ref)
-    if data == json.loads(raw):
-        return f"Codex 已接入，当前模型 {chosen}（未执行推理测试）"
+    routes = defaults.setdefault("models", {})
+    main = data["agents"].get("entries", {}).get("main", {})
+    if main.get("params") or routes.get(codex_ref, {}).get("params"):
+        raise ValueError("main Agent 或所选 GPT 模型有独立请求参数，请先移除后接入原生 Codex")
+    shared = defaults.pop("params", {})
+    if not shared:
+        return
+    refs = set(routes)
+    for provider, definition in data.get("models", {}).get("providers", {}).items():
+        refs.update(f"{provider}/{m['id']}" for m in definition.get("models", []) if m.get("id"))
+    for slot in ("model", "imageModel"):
+        selection = defaults.get(slot, {})
+        if isinstance(selection, str):
+            refs.add(selection)
+        else:
+            refs.update(selection.get("fallbacks", []))
+            if selection.get("primary"):
+                refs.add(selection["primary"])
+    for ref in refs:
+        if ref == codex_ref or routes.get(ref, {}).get("agentRuntime", {}).get("id") == "codex":
+            continue
+        entry = routes.setdefault(ref, {})
+        entry["params"] = {**shared, **entry.get("params", {})}
+
+
+def _save_config(raw: bytes, data: dict) -> None:
+    path = config_path()
     fd, candidate = tempfile.mkstemp(prefix=".codex-config-", suffix=".json", dir=path.parent)
     temp = Path(candidate)
     try:
@@ -204,4 +184,92 @@ def enable(model: str = "") -> str:
         temp.replace(path)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def _ensure_plugin(discovery: dict) -> None:
+    """Let OpenClaw establish official provenance in its own profile registry."""
+    global _discovery_cache
+    if _inspect("codex").get("trustedOfficialInstall"):
+        return
+    version = discovery.get("pluginVersion", "")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
+        raise ValueError("无法确定官方 Codex 插件版本，请先更新主实例插件")
+    env = os.environ.copy()
+    env.update(OPENCLAW_STATE_DIR=str(config_path().parent), OPENCLAW_CONFIG_PATH=str(config_path()))
+    env.pop("OPENCLAW_PROFILE", None)
+
+    def run(args, timeout):
+        result = subprocess.run(openclaw_base_cmd() + args, env=env, cwd=config_path().parent, capture_output=True,
+                                text=True, timeout=timeout)
+        if result.returncode != 0:
+            raise ValueError("Codex 插件安装或加载失败，未切换模型；请检查 Easel 插件状态后重试")
+
+    # Repair the former implementation's cross-profile load-path override only.
+    raw = config_path().read_bytes()
+    data = json.loads(raw)
+    paths = data.get("plugins", {}).get("load", {}).get("paths", [])
+    if discovery["pluginPath"] in paths:
+        paths.remove(discovery["pluginPath"])
+        _save_config(raw, data)
+        run(["plugins", "registry", "--refresh", "--json"], TIMEOUT_LOCAL_AGENT_CONFIG)
+    if not _inspect("codex").get("trustedOfficialInstall"):
+        run(["plugins", "install", f"npm:@openclaw/codex@{version}", "--no-enable"],
+            TIMEOUT_LOCAL_AGENT_INSTALL)
+    _discovery_cache = None
+    if not _inspect("codex").get("trustedOfficialInstall"):
+        raise ValueError("Easel 尚未认可 Codex 的官方安装来源，未切换模型")
+
+
+def enable(model: str = "") -> str:
+    discovery = discover()
+    if not discovery["supported"]:
+        raise ValueError(discovery["reason"])
+    ids = [m["id"] for m in discovery["models"]]
+    chosen = model or (DEFAULT_MODEL if DEFAULT_MODEL in ids else ids[0])
+    if chosen not in ids:
+        raise ValueError("所选模型不在本机 OpenClaw 的 GPT 可选目录中")
+    command = shutil.which("codex")
+    if not command:
+        raise ValueError("未找到本机 Codex")
+    _check_login(command)
+    _ensure_plugin(discovery)
+    path = config_path()
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    _move_legacy_provider(data)
+    plugins = data.setdefault("plugins", {})
+    if plugins.get("enabled") is False:
+        raise ValueError("OpenClaw 已全局禁用插件，请先启用插件功能")
+    for plugin_id in ("codex", "openai"):
+        plugins.setdefault("entries", {}).setdefault(plugin_id, {})["enabled"] = True
+        if isinstance(plugins.get("allow"), list) and plugin_id not in plugins["allow"]:
+            plugins["allow"].append(plugin_id)
+        if plugin_id in plugins.get("deny", []):
+            plugins["deny"].remove(plugin_id)
+    config = plugins["entries"]["codex"].setdefault("config", {})
+    config.setdefault("sessionCatalog", {})["enabled"] = False
+    app_server = config.setdefault("appServer", {})
+    if app_server.get("transport", "stdio") != "stdio":
+        raise ValueError("已有远程 Codex 接入配置，不能用本机接入覆盖它")
+    app_server.update(command=command, homeScope="user")
+    defaults = data.setdefault("agents", {}).setdefault("defaults", {})
+    # An agent-level override would otherwise make a successful save ineffective.
+    for entry in [*data["agents"].get("list", []),
+                  {"id": "main", **data["agents"].get("entries", {}).get("main", {})}]:
+        if entry.get("id") == "main" and entry.get("model"):
+            raise ValueError("main Agent 设置了独立模型，请先移除该覆盖再使用一键接入")
+    ref = f"openai/{chosen}"
+    _scope_api_params(data, ref)
+    defaults.setdefault("models", {}).setdefault(ref, {}).setdefault("agentRuntime", {})["id"] = "codex"
+    primary = defaults.get("model", {})
+    if isinstance(primary, str):
+        primary = {"primary": primary}
+    primary["primary"] = ref
+    defaults["model"] = primary
+    allow = defaults.get("modelPolicy", {}).get("allow")
+    if isinstance(allow, list) and ref not in allow:
+        allow.append(ref)
+    if data == json.loads(raw):
+        return f"Codex 已接入，当前模型 {chosen}（未执行推理测试）"
+    _save_config(raw, data)
     return f"Codex 已接入并设为主模型：{chosen}；配置与登录检查通过，未执行推理测试"
