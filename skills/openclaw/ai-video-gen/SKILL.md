@@ -27,9 +27,28 @@ python skills/shared/scripts/ai_video.py check --provider dashscope
 | `xhs-maas` | 小红书内网 MaaS（happyhorse 文/图生视频）| `XHS_MAAS_API_KEY`（可选 `XHS_MAAS_VIDEO_BASE`/`XHS_MAAS_T2V_MODEL`/`XHS_MAAS_I2V_MODEL`）。DashScope 风格异步 + api-key 头，内网直连 |
 | `agnes` | Agnes（agnes-video-2.5-flash）| `AGNES_API_KEY`（可选 `AGNES_BASE_URL`/`AGNES_MODEL`/`AGNES_SIZE`）。OpenAI Videos 兼容创建 + 自定义端点轮询；**默认带原生音频**（prompt 描述声音）；外网走代理 |
 
-也可设 `VIDEO_PROVIDER` 免去每次 `--provider`。
+也可设 `VIDEO_PROVIDER` 免去每次 `--provider`。统一媒体配置中的 video 默认实例优先于该变量；显式 `--provider` 优先级最高。
 
-执行前先跑 `model_registry.py configured --group video --env-file .env`：只有一个可用就显式选它；多个可用且用户没点名时，列出 provider/模型询问本次使用哪个，不按默认值擅自选择。
+### 已配置媒体适配器（H3）
+
+执行 `python -m easel.media providers` 查看实例与默认值。H3 在视频设置页原表格添加实例，不需要 API Key；执行 `check --provider <实例ID>` 和 `capabilities --provider <实例ID>` 检查。已选择或配置默认实例时直接使用它；不要因旧注册表不包含适配器就误报未配置或切换服务。
+
+- FL2VA：文生视频、首帧、尾帧、首尾帧；Ref2VA：多图/视频/音频参考。不同能力不互相 fallback，参考任务必须显式选择 Ref2VA。
+- 默认实例等待1800秒，时长4–15秒、768p；画幅仍需用户确认。首帧用 `image2video --image`，加 `--last-frame` 可指定尾帧；仅尾帧用 `text2video --last-frame`。
+- Ref2VA 用 `reference2video`，`--ref-image`、`--ref-video`、`--ref-audio` 可重复，均为本地文件。每份视频/音频2–15秒，同类合计不超过15秒；最多9图片/3视频/3音频、混合合计12份。提示词用 `<Picture 1>`、`<Video 1>`、`<Audio 1>` 指明各素材用途。
+- H3默认原生音频，暂不支持 `--audio off`；音轨存在不代表逐字对白或精确复刻参考声，不能冒充已实测能力。
+- 提交后任务记录在 `<输出路径>.job.json`。超时/断连先查看记录，有ID时用相同 provider/output 加 `--resume` 继续查询下载；没有ID先查服务日志。不得自动重交、中断远端队列或读取H20本地文件路径。
+
+```bash
+python skills/shared/scripts/ai_video.py reference2video --provider h3-ref2va \
+  --ref-image outputs/主题名/person.png --ref-video outputs/主题名/motion.mp4 \
+  --ref-audio outputs/主题名/ambience.wav \
+  --prompt "Use <Picture 1> as subject, <Video 1> for motion and <Audio 1> for sound." \
+  --duration 5 --ratio 16:9 -o outputs/主题名/ref.mp4
+```
+
+
+仅使用旧内置供应商时，执行前先跑 `model_registry.py configured --group video --env-file .env`：只有一个可用就显式选它；多个可用且用户没点名时，列出 provider/模型询问本次使用哪个，不按默认值擅自选择。
 
 ## 输入
 

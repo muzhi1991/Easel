@@ -1422,11 +1422,17 @@ def _model_channels() -> dict:
     ]
     channels: dict = {"chat": {"rows": chat_rows}, "transcribe": {"rows": trans_rows}}
     try:
+        adapter_video_default = _media_runtime().load()["defaults"].get("video")
+    except RuntimeError:
+        adapter_video_default = None
+    try:
         import model_registry as _mr  # skills/shared/scripts 已在 sys.path 上
         _setting_env = {"video": "VIDEO_PROVIDER", "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}
         for _gid, _ch in (("image", "image"), ("video", "video"), ("music", "music"), ("voice", "speech")):
             _spec = _mr.MODEL_GROUPS[_gid]
             _chosen = (env.get(_setting_env.get(_gid, ""), "") or "").strip()
+            if _gid == "video" and adapter_video_default:
+                _chosen = ""
             _rows = []
             for _p in _spec["providers"]:
                 _req = [k for k in _p["keys"] if k["required"]]
@@ -1734,6 +1740,13 @@ async def api_settings_models_save(req: ModelSaveRequest):
         if not _mupd:
             raise HTTPException(400, "没有可保存的改动（key 留空表示不改）")
         _write_env_direct(_mupd)
+        if _gid0 == "video" and _primary0:
+            try:
+                rt = _media_runtime()
+            except RuntimeError:
+                rt = None  # Legacy providers also work without the optional adapter package.
+            if rt is not None and rt.load()["defaults"].get("video"):
+                rt.clear_default("video")
         _resp0 = {"ok": True, "note": ""}
         _resp0.update(_model_channels())
         return _resp0

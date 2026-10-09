@@ -27,6 +27,24 @@ class TranscriptionRequest:
     max_line_chars: int = 18
 
 
+@dataclass(frozen=True)
+class VideoRequest:
+    prompt: str
+    output: Path
+    first_frame: Path | None = None
+    last_frame: Path | None = None
+    reference_images: tuple[Path, ...] = ()
+    reference_videos: tuple[Path, ...] = ()
+    reference_audio: tuple[Path, ...] = ()
+    duration: int = 5
+    ratio: str = "16:9"
+    seed: int | None = None
+    model: str | None = None
+    audio: str = "auto"
+    timeout: float | None = None
+    resume: bool = False
+
+
 class Adapter(Protocol):
     descriptor: dict[str, Any]
 
@@ -69,7 +87,8 @@ class MediaRuntime:
         if adapters is None:
             from .qwen import QwenAdapter
             from .openai import OpenAITranscriptionAdapter
-            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter()}
+            from .h3 import H3Adapter
+            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter()}
             for entry in importlib.metadata.entry_points(group="easel.media_adapters"):
                 if entry.name not in adapters:
                     adapters[entry.name] = entry.load()()
@@ -161,6 +180,12 @@ class MediaRuntime:
                 data["defaults"][ch] = clean["id"]
             self._write(data)
         return clean
+
+    def clear_default(self, channel: str) -> None:
+        with file_lock(self.path.with_suffix(".lock")):
+            data = self.load()
+            data["defaults"].pop(channel, None)
+            self._write(data)
 
     def remove_provider(self, pid: str) -> None:
         with file_lock(self.path.with_suffix(".lock")):

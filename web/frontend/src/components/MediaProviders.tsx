@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { deleteMediaProvider, fetchMediaProviders, probeMediaProvider, saveMediaProvider } from '../lib/api';
 import type { MediaConfiguration, MediaProvider, ModelRow } from '../lib/api';
 
 /** Descriptor-driven extension UI: no Qwen fields or endpoint knowledge here. */
-export default function MediaProviders({ channel, builtInRows = [] }: { channel: string; builtInRows?: ModelRow[] }) {
+export default function MediaProviders({ channel, builtInRows = [], builtInBoard, onConfigured }: { channel: string; builtInRows?: ModelRow[]; builtInBoard?: (rows: ReactNode) => ReactNode; onConfigured?: (configured: boolean) => void }) {
   const [config, setConfig] = useState<MediaConfiguration | null>(null);
   const [draft, setDraft] = useState<MediaProvider | null>(null);
   const [editing, setEditing] = useState(false);
@@ -13,14 +14,17 @@ export default function MediaProviders({ channel, builtInRows = [] }: { channel:
 
   useEffect(() => {
     let alive = true;
-    fetchMediaProviders().then((data) => { if (alive) setConfig(data); })
+    const refresh = () => fetchMediaProviders().then((data) => { if (alive) setConfig(data); })
       .catch((e: Error) => { if (alive) setNote(e.message); });
-    return () => { alive = false; };
+    refresh();
+    window.addEventListener('easel-media-config', refresh);
+    return () => { alive = false; window.removeEventListener('easel-media-config', refresh); };
   }, []);
 
   useEffect(() => { setDraft(null); setNote(''); }, [channel]);
   const adapters = config?.adapters.filter((a) => a.channels.includes(channel)) || [];
   const providers = config?.providers.filter((p) => adapters.some((a) => a.id === p.adapter)) || [];
+  useEffect(() => { onConfigured?.(providers.length > 0); }, [config, channel, onConfigured]);
   const selected = adapters.find((a) => a.id === draft?.adapter);
 
   const newDraft = (adapter: string): MediaProvider => ({
@@ -31,7 +35,7 @@ export default function MediaProviders({ channel, builtInRows = [] }: { channel:
 
   const act = async (action: () => Promise<MediaConfiguration>) => {
     setBusy(true); setNote('');
-    try { setConfig(await action()); setDraft(null); setNote('已保存，下一次任务生效'); }
+    try { setConfig(await action()); setDraft(null); setNote('已保存，下一次任务生效'); window.dispatchEvent(new Event('easel-media-config')); }
     catch (e) { setNote(e instanceof Error ? e.message : '操作失败'); }
     finally { setBusy(false); }
   };
@@ -46,29 +50,7 @@ export default function MediaProviders({ channel, builtInRows = [] }: { channel:
     finally { setBusy(false); }
   };
 
-  // Other channels can use this same UI when their first execution adapter is installed.
-  if (!adapters.length && config && !builtInRows.length) return null;
-  return (
-    <div style={{ marginTop: 16 }}>
-      <div className="panel-top">
-        <span className="spacer" />
-        <button className="btn btn-sm" disabled={busy || !adapters.length} onClick={() => {
-          setDraft(newDraft(adapters[0].id)); setEditing(false); setNote('');
-        }}>＋ 添加供应商</button>
-      </div>
-      <div className="board media-provider-board">
-        <div className="prow head">
-          <span>顺序</span><span>供应商</span><span>类型</span><span>模型</span>
-          <span>Base URL</span><span>API Key</span><span>角色</span><span>连接状态</span><span>操作</span>
-        </div>
-        {builtInRows.map((row, index) => <div className="prow" key={`builtin-${index}`}>
-          <span className="step ghost">{row.order || '—'}</span>
-          <span className="pname">{row.name}<small>{row.sub}</small></span>
-          <span>{row.type}</span><span className="cell-text">{row.model || '—'}</span>
-          <span className="cell-text">{row.baseUrl || '—'}</span><span>{row.keyMasked || '—'}</span>
-          <span className="tag main">优先</span><span>{row.result || '—'}</span><span />
-        </div>)}
-        {providers.map((provider, index) => {
+  const providerRows = providers.map((provider, index) => {
           const isDefault = config?.defaults[channel] === provider.id;
           const adapter = adapters.find((a) => a.id === provider.adapter);
           const urls = Object.entries(provider.settings).filter(([key]) => key.endsWith('_url'));
@@ -81,7 +63,7 @@ export default function MediaProviders({ channel, builtInRows = [] }: { channel:
             <span className="cell-text" title={String(provider.settings.api_key_env || '无需鉴权')}>
               {provider.settings.api_key_env ? '环境凭证' : '无需'}</span>
             <button className={`tag ${isDefault ? 'main' : 'backup'}`} disabled={busy || isDefault}
-              title={isDefault ? '没有现成字幕时使用' : '设为默认转写供应商'}
+              title={isDefault ? '此通道默认供应商' : '设为此通道默认供应商'}
               onClick={() => void act(() => saveMediaProvider(provider, [channel]))}>{isDefault ? '默认' : '可选'}</button>
             <span className="cell-text" title={probes[provider.id] || '尚未探活'}>{probes[provider.id] || '尚未探活'}</span>
             <span className="media-provider-actions">
@@ -93,8 +75,31 @@ export default function MediaProviders({ channel, builtInRows = [] }: { channel:
                 onClick={() => void act(() => deleteMediaProvider(provider.id))}>删除</button>}
             </span>
           </div>;
-        })}
+        });
+  // Other channels can use this same UI when their first execution adapter is installed.
+  if (!adapters.length && config && !builtInRows.length && !builtInBoard) return null;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="panel-top">
+        <span className="spacer" />
+        <button className="btn btn-sm" disabled={busy || !adapters.length} onClick={() => {
+          setDraft(newDraft(adapters[0].id)); setEditing(false); setNote('');
+        }}>＋ 添加供应商</button>
       </div>
+      {builtInBoard ? builtInBoard(providerRows) : <div className="board media-provider-board">
+        <div className="prow head">
+          <span>顺序</span><span>供应商</span><span>类型</span><span>模型</span>
+          <span>Base URL</span><span>API Key</span><span>角色</span><span>连接状态</span><span>操作</span>
+        </div>
+        {builtInRows.map((row, index) => <div className="prow" key={`builtin-${index}`}>
+          <span className="step ghost">{row.order || '—'}</span>
+          <span className="pname">{row.name}<small>{row.sub}</small></span>
+          <span>{row.type}</span><span className="cell-text">{row.model || '—'}</span>
+          <span className="cell-text">{row.baseUrl || '—'}</span><span>{row.keyMasked || '—'}</span>
+          <span className="tag main">优先</span><span>{row.result || '—'}</span><span />
+        </div>)}
+        {providerRows}
+      </div>}
       {config && !providers.length && <div className="foot-note">尚未配置此通道的自定义供应商。</div>}
       {draft && <form onSubmit={(e) => { e.preventDefault(); void act(() => saveMediaProvider(draft)); }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) minmax(160px, 2fr)', gap: 10, padding: '16px 0' }}>
