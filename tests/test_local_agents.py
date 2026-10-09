@@ -312,6 +312,7 @@ def codex_ready(monkeypatch):
         'models': [{'id': 'gpt-6.1-sol', 'name': 'GPT-6.1 Sol'}, {'id': 'gpt-6-astra', 'name': 'GPT-6 Astra'}],
     })
     monkeypatch.setattr(cb, '_check_login', lambda command: None)
+    monkeypatch.setattr(cb, '_ensure_plugin', lambda discovery: None)
     monkeypatch.setattr(cb, '_validate', lambda path: None)
 
 
