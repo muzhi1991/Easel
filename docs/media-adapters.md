@@ -404,3 +404,5 @@ Base URL 是服务根地址，无 `/v1` 或 `/ocr`。配置保存在用户媒体
 用户账户网页显示每月 8,000 积分、最多 7 分钟，这是用户看到的页面额度；不能未经账户核实当作 API 免费模型额度。公开 API 文档把 `s2.1-pro-free` 标为零价、受公平使用限制，未公布固定总量或期限。网页订阅额度和 API 计费需分别确认。不宣称无限量或永久免费。密钥仅写本机 `.env`，不提交。
 
 依据：[Fish API 快速开始](https://docs.fish.audio/developer-guide/getting-started/quickstart)、[TTS 模型 header](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)、[API 价格](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)。
+
+本次真实验收：明确选择 `s2.1-pro-free`，使用官方默认音色生成一句中文，返回 44KB MP3、ffprobe 时长 2.795 秒。未核查调用前后账户积分，不推断是否扣网页积分。离线验证 463 passed / 3 skipped，技能与命令验证通过。
