@@ -196,7 +196,7 @@ class MyAdapter:
 | `video_pipeline.py`、SDK `pipeline/doctor.py` | 报告默认实例配置，不再提示自动 Whisper 兜底 |
 | `auto-subtitle/SKILL.md`、`video-production/SKILL.md` | Agent 运行约定 |
 
-独立分支 rebase 官方升级时检查这些接线点。配置仍留用户目录；重新安装适配包并构建前端，重启 Web 加载代码，不需修改共享 OpenClaw 安装包。旧 GLM user-text 补丁已经退役，此接入不涉及该补丁，也不需要在任何升级中重打。
+官方升级先快进同步 `main`，在独立 `sync/*` 分支合并官方更新并检查这些接线点，验证后合并到运行分支 `dev`；长期 `dev` 不 rebase 或强推，具体流程见 [fork-maintenance.md](fork-maintenance.md)。配置仍留用户目录；需要时重新安装适配包、构建前端并重启 Web 加载代码，不需修改共享 OpenClaw 安装包。旧 GLM user-text 补丁已经退役，此接入不涉及该补丁，也不需要在任何升级中重打。
 
 更新 Agent 技能时同步相关 SKILL 与脚本副本。完整 `openclaw/sync.sh` 还会改 workspace 文件和清空 MEMORY.md，若只更新本功能应仅同步相关文件，避免无关状态变化。
 
