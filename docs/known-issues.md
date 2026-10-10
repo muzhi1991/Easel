@@ -66,6 +66,8 @@ bash setup.sh
 
 默认值读取 Easel 实例的 `agents.defaults.thinkingDefault`；未配置时使用 `EASEL_THINKING_LEVEL`，再回退到 `medium`。会话显式选择优先，两种对话传输均使用同一个解析结果。HTTP 接口本身不读取 `reasoning_effort`，因此通过网关 `sessions.patch` 应用强度，再发起同一会话的 HTTP 请求；CLI 使用 `--thinking`。应用失败会报错，不会静默以其他强度继续。可用档位由当前模型和网关决定，选择不支持的档位时需改选。
 
-## 代理 Fake-IP 导致模型列表被判为内网
+## 模型接口地址策略
 
-若域名解析到代理的 `198.18.0.0/15` Fake-IP 网段，「拉取模型」或「自测」可能被地址校验拦截。`start-web-lan.sh` 会从 Easel 实例配置中收集所有已保存 API 供应商的精确 origin（协议、域名、端口），通过 `EASEL_FAKE_IP_ORIGINS` 允许这些域名的 Fake-IP；不再依赖主模型是否有 API 地址，因此主模型为 Codex 时也能检查备用供应商。真实私网、回环等地址仍被拒绝。显式设置该环境变量时使用显式值；新增或更改供应商地址后需重启 Web 更新列表。
+「拉取模型」和「自测」允许用户指定任意合法 HTTP(S) 模型端点，包括本机、内网和代理 Fake-IP，不再按解析 IP 所属网段拦截。`EASEL_FAKE_IP_ORIGINS` 白名单及启动脚本的自动收集逻辑已移除。请求会携带配置的 API Key 发送到目标地址；URL 格式检查、禁止跟随重定向，以及 Web 写入来源校验仍保留。OpenClaw 独立管理网络策略：如需放开模型请求，设置每个 `models.providers.<id>.request.allowPrivateNetwork: true`；浏览器、网页抓取和定时任务 Webhook 分别设置 `browser.ssrfPolicy`、`tools.web.fetch.ssrfPolicy`、`cron.webhookSsrfPolicy` 下的 `dangerouslyAllowPrivateNetwork: true`，并移除 `blockedHostnames`。实例配置不提交 Git。
+
+当前 OpenClaw 2026.9.8 没有覆盖所有出站请求的总开关。HTTP 输入附件的 URL 下载路径仍固定使用 `allowPrivateNetwork: false`，上述开关不覆盖它；应优先用本地上传或 Base64 输入，不能将配置放开描述成所有底层检查都已移除。

@@ -814,39 +814,6 @@ def _valid_base_url(u: str) -> bool:
     return p.scheme in ('http', 'https') and bool(p.hostname)
 
 
-def _ssrf_safe(u: str) -> bool:
-    """自测会带着真 Key 去打这个地址，所以不许指向本机/内网/云元数据——
-    这些地址上的服务通常无鉴权，一旦被当成「模型端点」就成了打内网的跳板。"""
-    try:
-        parsed = urllib.parse.urlparse(u)
-        host = parsed.hostname or ''
-        origin = (parsed.scheme, host, parsed.port or (443 if parsed.scheme == 'https' else 80))
-        fake_ip_allowed = False
-        # Explicit local configuration for DNS proxies using the benchmark Fake-IP
-        # range. Match scheme/hostname/port; never relax real private-IP checks.
-        for entry in os.environ.get('EASEL_FAKE_IP_ORIGINS', '').split(','):
-            trusted = urllib.parse.urlparse(entry.strip())
-            if (trusted.scheme, trusted.hostname,
-                    trusted.port or (443 if trusted.scheme == 'https' else 80)) == origin:
-                try:
-                    ipaddress.ip_address(host)
-                except ValueError:
-                    fake_ip_allowed = True
-        infos = socket.getaddrinfo(host, None)
-    except Exception:  # noqa: BLE001  解析不了就当不安全
-        return False
-    for info in infos:
-        try:
-            ip = ipaddress.ip_address(info[4][0])
-        except ValueError:
-            return False
-        if fake_ip_allowed and ip.version == 4 and ip in ipaddress.ip_network('198.18.0.0/15'):
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
-    return True
-
-
 def _write_env(updates: dict[str, str]) -> None:
     '就地更新命中的 KEY、其余行原样保留，未命中的追加末尾；空串则删除该行。原子写。'
     updates = {k: v for k, v in updates.items() if k in _ENV_ALLOWLIST}
@@ -2085,8 +2052,8 @@ _FETCH_KEY_BY_SLOT = {
 async def api_models_available(req: ModelsFetchRequest):
     """代前端拉一次 GET {base}/models，返回模型 id 列表（自定义供应商不用再手打模型名）。
 
-    与 selftest 同一条安全线：带着用户 Key 出去的请求，目标必须过 _valid_base_url +
-    _ssrf_safe；不落盘、不写日志。
+    与 selftest 一致：校验 HTTP(S) URL 格式，允许用户指定本机、内网或代理地址。
+    Key 不落盘、不写日志。
     """
     base = (req.baseUrl or "").strip().rstrip("/")
     key = (req.key or "").strip()
@@ -2109,8 +2076,6 @@ async def api_models_available(req: ModelsFetchRequest):
         raise HTTPException(400, "Base URL 不能为空")
     if not _valid_base_url(base):
         raise HTTPException(400, "Base URL 不合法")
-    if not _ssrf_safe(base):
-        raise HTTPException(400, "目标指向本机/内网地址，已拒绝（避免把 API Key 发给内网服务）")
 
     anthropic = (req.protocol or "").strip().lower() == "anthropic"
     if anthropic:
@@ -2183,8 +2148,7 @@ async def api_models_selftest(req: SelftestRequest):
         targets.append(((env.get("SILICONFLOW_BASE_URL") or "https://api.siliconflow.cn/v1").strip().rstrip("/"),
                         env["SILICONFLOW_API_KEY"].strip(), False))
 
-    # 这里会把真实 API Key 当 Bearer 发出去，所以目标地址必须先过闸：
-    # 合法 http(s)、且不指向本机/内网/云元数据；跳转也不跟（跟了等于绕过前面的判断）。
+    # 用户指定的 HTTP(S) 端点均可探测；不跟随跳转，避免把 Key 转发到其他端点。
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *_a, **_kw):
             return None
@@ -2195,9 +2159,6 @@ async def api_models_selftest(req: SelftestRequest):
         t0 = time.time()
         if not _valid_base_url(base):
             return {"baseUrl": base, "ok": False, "ms": 0, "detail": "Base URL 不合法，未发起请求"}
-        if not _ssrf_safe(base):
-            return {"baseUrl": base, "ok": False, "ms": 0,
-                    "detail": "目标指向本机/内网地址，已拒绝（避免把 API Key 发给内网服务）"}
         try:
             if anthropic:
                 # Anthropic Messages 协议的鉴权头是 x-api-key（不是 Authorization: Bearer），

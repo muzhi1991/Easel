@@ -207,28 +207,6 @@ def test_valid_base_url(url, ok):
     assert web._valid_base_url(url) is ok
 
 
-# ---- 自测探针会把真 Key 当 Bearer 发出去：不许指向本机/内网/云元数据 ----
-
-@pytest.mark.parametrize("url", [
-    "http://127.0.0.1:18789/v1",
-    "http://localhost/v1",
-    "http://169.254.169.254/latest",      # 云元数据
-    "http://10.0.0.1/v1",
-    "http://192.168.1.1/v1",
-    "http://[::1]/v1",
-    "http://no-such-host-zzz.invalid/v1",  # 解析不了就当不安全
-])
-def test_ssrf_guard_rejects_internal(url):
-    assert web._ssrf_safe(url) is False
-
-
-def test_selftest_probe_has_guards():
-    import inspect
-    src = inspect.getsource(web.api_models_selftest)
-    assert "_valid_base_url" in src and "_ssrf_safe" in src, "探针前必须先过两道闸"
-    assert "redirect_request" in src, "不能跟跳转——跟了等于绕过前面的判断"
-
-
 # ---- 装工具接口：id 只认引擎里真实存在的配方 ----
 
 @pytest.mark.parametrize("bad_id", ["--help", "; touch /tmp/pwn", "../../etc/passwd", "nope-xyz"])

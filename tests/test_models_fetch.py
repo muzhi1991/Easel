@@ -6,8 +6,7 @@ OpenAI 兼容网关普遍提供 GET {base}/models。此前面板里自定义供�
 
 安全设计与 /api/settings/models/selftest 一致：
   * key 由前端显式传入（未保存的草稿也能拉），服务端不落盘、不写日志；
-  * 目标必须过 _valid_base_url + _ssrf_safe —— 拉取虽只读，但带着用户 Key，
-    一样不能变成把凭据送进内网的跳板。
+  * 目标必须是合法 HTTP(S) URL；允许用户配置本机、内网及代理地址。
 
 运行：pytest tests/test_models_fetch.py -q
 """
@@ -72,11 +71,6 @@ class _Resp:
 
 def _stub_opener(monkeypatch, payload: bytes, capture: list | None = None):
     capture = capture if capture is not None else []
-    # 测试环境 DNS 对 example.com 的解析不可控（可能落到内网网段被 _ssrf_safe 拒）。
-    # 正常路径用例只关心「请求怎么发、响应怎么解析」，放行交给 _ssrf_safe 自己的用例。
-    monkeypatch.setattr(web, "_ssrf_safe", lambda u: True)
-    # 同一原因：_valid_base_url 也会做 DNS/格式校验，测试环境不可控。
-    monkeypatch.setattr(web, "_valid_base_url", lambda u: True)
     class _Opener:
         def open(self, rq, timeout=None):
             capture.append((rq.full_url, {k.lower(): v for k, v in dict(rq.headers).items()}))
@@ -124,18 +118,27 @@ def test_fetch_falls_back_to_bare_list(sandbox, monkeypatch):
     assert resp.json()["models"] == ["y", "z"]
 
 
-def test_fetch_rejects_private_targets(sandbox, monkeypatch):
-    """带着 Key 的请求不许进内网（SSRF 闸与 selftest 同款）。"""
-    seen: list = []
+@pytest.mark.parametrize("base", [
+    "http://127.0.0.1:8890/v1", "http://localhost/v1", "http://[::1]/v1",
+    "http://192.168.1.1/v1", "http://10.0.0.1/v1", "http://169.254.169.254/v1",
+    "http://198.18.0.43/v1", "https://proxy.example.com:60443/v1",
+])
+def test_fetch_allows_user_selected_addresses(sandbox, monkeypatch, base):
+    seen = []
+    _stub_opener(monkeypatch, b'{"data":[{"id":"local-model"}]}', seen)
+    monkeypatch.setattr(web.socket, 'getaddrinfo', lambda *_: [(2, 1, 6, '', ('198.18.0.43', 0))])
+    response = sandbox.post('/api/settings/models/available', json={'baseUrl': base, 'key': 'test-key'})
+    assert response.status_code == 200, response.text
+    assert response.json()['models'] == ['local-model']
+    assert seen == [(base + '/models', {'authorization': 'Bearer test-key'})]
 
-    def _boom(*a, **k):  # pragma: no cover - 若被调用说明闸失效
-        seen.append(a)
-        raise AssertionError("内网目标不应发起请求")
 
-    monkeypatch.setattr(web.urllib.request, "urlopen", _boom)
-    resp = sandbox.post("/api/settings/models/available",
-                        json={"baseUrl": "http://169.254.169.254/latest", "key": "k"})
-    assert resp.status_code >= 400
+@pytest.mark.parametrize("base", ['file:///etc/passwd', 'ftp://example.com', 'https://user:secret@example.com'])
+def test_fetch_still_rejects_invalid_url(sandbox, monkeypatch, base):
+    seen = []
+    _stub_opener(monkeypatch, b'{"data":[]}', seen)
+    response = sandbox.post('/api/settings/models/available', json={'baseUrl': base, 'key': 'test-key'})
+    assert response.status_code == 400
     assert not seen
 
 
