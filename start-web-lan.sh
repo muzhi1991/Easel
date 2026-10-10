@@ -8,20 +8,20 @@ if [ -z "$LAN_IP" ]; then
 fi
 export EASEL_EXTRA_HOSTS="${EASEL_EXTRA_HOSTS:+$EASEL_EXTRA_HOSTS,}$LAN_IP"
 export EASEL_EXTRA_ORIGINS="${EASEL_EXTRA_ORIGINS:+$EASEL_EXTRA_ORIGINS,}http://$LAN_IP:7860"
-# Trust only the configured primary provider's origin for proxy Fake-IP DNS.
+# Trust exact origins of saved API providers for proxy Fake-IP DNS.
+# A native primary (e.g. Codex) has no URL; backup providers still need discovery.
 if [ -z "${EASEL_FAKE_IP_ORIGINS:-}" ]; then
   EASEL_FAKE_IP_ORIGINS="$(.venv/bin/python - <<'PYCONFIG'
 import json
-from pathlib import Path
 from urllib.parse import urlsplit
-config = json.loads((Path.home() / '.openclaw-easel/openclaw.json').read_text())
-model = config.get('agents', {}).get('defaults', {}).get('model', {})
-primary = model if isinstance(model, str) else model.get('primary', '')
-provider = primary.split('/', 1)[0]
-url = urlsplit(config.get('models', {}).get('providers', {}).get(provider, {}).get('baseUrl', ''))
-# Native runtimes (Codex/Claude CLI) do not require an API provider URL.
-if url.scheme and url.netloc:
-    print(f'{url.scheme}://{url.netloc}')
+from easel.openclaw_workspace import config_path
+config = json.loads(config_path().read_text())
+origins = set()
+for provider in config.get('models', {}).get('providers', {}).values():
+    url = urlsplit(provider.get('baseUrl', ''))
+    if url.scheme in ('http', 'https') and url.hostname and not url.username and not url.password:
+        origins.add(f'{url.scheme}://{url.netloc}')
+print(','.join(sorted(origins)))
 PYCONFIG
 )"
 fi
