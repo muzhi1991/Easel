@@ -130,16 +130,6 @@ def test_openai_slot_still_unchanged(sandbox):
 def _capture_probes(monkeypatch):
     """拦住真实网络请求，记录每次探测的 (url, headers)。"""
     seen: list[tuple[str, dict]] = []
-    # Protocol tests must not depend on the host's proxy/Fake-IP DNS.
-    def _dns(host, *_args):
-        import ipaddress
-        try:
-            address = str(ipaddress.ip_address(host))
-        except ValueError:
-            address = '8.8.8.8'
-        return [(2, 1, 6, '', (address, 0))]
-    monkeypatch.setattr(web.socket, 'getaddrinfo', _dns)
-
     class _Resp:
         status = 200
 
@@ -191,16 +181,17 @@ def test_selftest_keeps_openai_shape(sandbox, monkeypatch):
     assert headers.get("authorization", "").startswith("Bearer ")
 
 
-def test_selftest_still_blocks_private_targets(sandbox, monkeypatch):
-    """自测会把真 Key 当凭据发出去 —— SSRF 闸不能被本次改动绕开。"""
+@pytest.mark.parametrize("base", ["http://127.0.0.1:8890", "http://192.168.1.1", "http://198.18.0.43"])
+def test_selftest_allows_user_selected_addresses(sandbox, monkeypatch, base):
+    """Local, private and Fake-IP model endpoints are user-configurable."""
     sandbox.env_file.write_text(
         ORIGINAL_ENV
-        + "ANTHROPIC_BASE_URL=http://169.254.169.254\n"
+        + f"ANTHROPIC_BASE_URL={base}\n"
           "ANTHROPIC_API_KEY=sk-ant-test\n",
         encoding="utf-8")
     seen = _capture_probes(monkeypatch)
     resp = sandbox.post("/api/settings/models/selftest", json={"channel": "chat"})
     assert resp.status_code == 200, resp.text
-    assert not any("169.254.169.254" in u for u, _ in seen), "内网目标竟然发了请求"
-    hit = [r for r in resp.json()["results"] if "169.254" in r["baseUrl"]]
-    assert hit and hit[0]["ok"] is False
+    assert any(u == base + "/v1/models" for u, _ in seen)
+    hit = [r for r in resp.json()["results"] if r["baseUrl"] == base]
+    assert hit and hit[0]["ok"] is True
