@@ -1,3 +1,4 @@
+import ReasoningMenu from './ReasoningMenu';
 import { useEffect, useState } from 'react';
 import { fetchThinking, saveThinking } from '../lib/api';
 import type { ThinkingLevel } from '../lib/api';
@@ -52,17 +53,13 @@ export default function ThinkingSelect({ defaults = false, value, onChange, disa
     finally { setBusy(false); }
   };
   return <div className={`thinking-control${defaults ? ' thinking-defaults' : ''}`}>
-    <label><span>{defaults ? '默认推理' : '推理'}</span>
-      <select aria-label={defaults ? '默认推理' : '推理'}
+    <div className="thinking-field"><span>{defaults ? '默认推理' : '推理'}</span>
+      <ReasoningMenu label={defaults ? '默认推理' : '推理'}
         title={note || (defaults ? '新对话的默认推理级别' : '下一条消息的推理级别')}
         disabled={disabled || busy || (!defaults && !effective) || (defaults && !current)}
-        value={defaults ? draft || '' : effective ? compactLevel(effective) : ''}
-        onChange={(e) => defaults ? setDraft(e.target.value as ThinkingLevel) : onChange?.(e.target.value as ThinkingLevel)}>
-        {!effective && !defaults && <option value="" disabled>—</option>}
-        {defaults && !current && <option value="" disabled>—</option>}
-        {levels.map((level) => <option value={level} key={level}>{level}</option>)}
-      </select>
-    </label>
+        value={defaults ? draft : effective ? compactLevel(effective) : undefined}
+        onChange={(level) => defaults ? setDraft(level) : onChange?.(level)} />
+    </div>
     {defaults && <><button className="btn btn-sm" disabled={busy || !draft || draft === current} onClick={() => void save()}>{busy ? '保存中…' : '保存'}</button>
       <span className="desc">用于未单独设置推理的对话。</span></>}
     {note && <span className="thinking-note" role="status">{note}</span>}
