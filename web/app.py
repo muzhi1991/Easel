@@ -1476,6 +1476,40 @@ class ThinkingSettingsRequest(BaseModel):
     thinking: ThinkingLevel
 
 
+@app.get("/api/chat/model")
+def api_chat_model(sessionId: str = ""):
+    """Read-only composer status; never create or modify a gateway session."""
+    if len(sessionId) > 120 or (sessionId and not re.fullmatch(r"[A-Za-z0-9_.-]+", sessionId)):
+        raise HTTPException(400, "无效的会话 ID")
+    source = "default"
+    if sessionId and GatewayClient is not None:
+        client = None
+        try:
+            client = GatewayClient(timeout=3)
+            row = client.session_model(f"agent:main:{sessionId}")
+            if row and row.get("model") and row.get("modelProvider"):
+                return {"model": row["model"], "modelRef": f"{row['modelProvider']}/{row['model']}",
+                        "source": "session"}
+        except Exception:
+            source = "unavailable"
+        finally:
+            if client is not None:
+                client.close()
+    elif sessionId:
+        source = "unavailable"
+    try:
+        cfg = json.loads(_oc_config_path().read_text(encoding="utf-8"))
+        agents = cfg.get("agents", {})
+        selection = agents.get("defaults", {}).get("model", {})
+        for entry in [*agents.get("list", []), {"id": "main", **agents.get("entries", {}).get("main", {})}]:
+            if entry.get("id") == "main" and entry.get("model"):
+                selection = entry["model"]
+        ref = selection if isinstance(selection, str) else selection.get("primary", "")
+        return {"model": ref.split("/", 1)[-1], "modelRef": ref, "source": source}
+    except (OSError, ValueError):
+        raise HTTPException(503, "模型配置读取失败")
+
+
 @app.get("/api/settings/thinking")
 async def api_thinking_settings():
     return {"thinking": _thinking_default()}

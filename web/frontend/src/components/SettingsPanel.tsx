@@ -193,6 +193,7 @@ export default function SettingsPanel({ onClose }: Props) {
     try {
       const d = await enableLocalAgent(id, model);
       setLocalAgentNote(d.note || '已接入');
+      window.dispatchEvent(new Event('easel-model-config'));
       const [agents, channels] = await Promise.all([fetchLocalAgents(), fetchModelChannels()]);
       setLocalAgents(agents.agents);
       setChatRows(channels.channels.chat.rows || []);
@@ -291,6 +292,7 @@ export default function SettingsPanel({ onClose }: Props) {
     try {
       const d = await fetchWithRetry(() => saveModelConfig(chan, payload, chan === 'chat' ? chatPrimary : undefined), 3, 20000);
       window.dispatchEvent(new Event('easel-media-config'));
+      if (chan === 'chat') window.dispatchEvent(new Event('easel-model-config'));
       setChatRows(d.channels.chat.rows || []);
       setChatPrimary(d.primary);
       setTransRows(d.channels.transcribe.rows || []);

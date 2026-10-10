@@ -346,6 +346,12 @@ class GatewayClient:
                 return msg.get("payload")
         raise GatewayQuestionError(f"{method} timed out")
 
+    def session_model(self, session_key: str) -> dict | None:
+        """Read the gateway's resolved model, including session overrides."""
+        payload = self._rpc("sessions.list", {"search": session_key, "limit": 20}) or {}
+        return next((row for row in payload.get("sessions", [])
+                     if row.get("key") == session_key), None)
+
     def set_thinking(self, session_key: str, level: str) -> dict:
         """Apply a per-session override before the HTTP agent turn starts."""
         return self._rpc("sessions.patch", {"key": session_key, "thinkingLevel": level}) or {}

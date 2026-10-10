@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import { fetchThinking, saveThinking } from '../lib/api';
 import type { ThinkingLevel } from '../lib/api';
 
-const levels: [ThinkingLevel, string][] = [
-  ['off', '关闭'], ['minimal', '最低'], ['low', '低'], ['medium', '中'],
-  ['high', '高'], ['xhigh', '更高'], ['adaptive', '自动'], ['max', '最大'], ['ultra', '极高'],
-];
+const levels: ThinkingLevel[] = ['max', 'high', 'medium', 'low', 'off'];
+// Migrate older saved choices to the compact set, including the value sent with a turn.
+function compactLevel(level: ThinkingLevel): ThinkingLevel {
+  if (levels.includes(level)) return level;
+  if (level === 'minimal') return 'low';
+  if (level === 'xhigh' || level === 'ultra') return 'max';
+  return 'high';
+}
 
 export default function ThinkingSelect({ defaults = false, value, onChange, disabled = false }: {
   defaults?: boolean; value?: ThinkingLevel; onChange?: (level?: ThinkingLevel) => void; disabled?: boolean;
@@ -16,30 +20,51 @@ export default function ThinkingSelect({ defaults = false, value, onChange, disa
   const [note, setNote] = useState('');
   useEffect(() => {
     let alive = true;
-    fetchThinking().then((d) => { if (alive) { setCurrent(d.thinking); setDraft(d.thinking); } })
-      .catch(() => { if (alive) setNote('默认强度读取失败'); });
-    return () => { alive = false; };
+    const refresh = () => {
+      fetchThinking().then((d) => {
+        if (alive) { setCurrent(d.thinking); setDraft(compactLevel(d.thinking)); setNote(''); }
+      }).catch(() => { if (alive) setNote('推理设置读取失败'); });
+    };
+    refresh();
+    window.addEventListener('easel-thinking-config', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener('easel-thinking-config', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, []);
+  const effective = value ?? current;
+  useEffect(() => {
+    if (!defaults && !disabled && effective && compactLevel(effective) !== effective) {
+      onChange?.(compactLevel(effective));
+    }
+  }, [defaults, disabled, effective, onChange]);
   const save = async () => {
     if (!draft) return;
     setBusy(true); setNote('');
-    try { const d = await saveThinking(draft); setCurrent(d.thinking); setDraft(d.thinking); setNote('已保存，下次发送生效'); }
-    catch (e) { setNote(e instanceof Error ? e.message : '保存失败'); }
+    try {
+      const d = await saveThinking(draft);
+      setCurrent(d.thinking); setDraft(compactLevel(d.thinking));
+      window.dispatchEvent(new Event('easel-thinking-config'));
+      setNote('已保存');
+    } catch (e) { setNote(e instanceof Error ? e.message : '保存失败'); }
     finally { setBusy(false); }
   };
-  const label = levels.find(([id]) => id === current)?.[1];
-  return <div className="thinking-control">
-    <label>{defaults ? '默认推理强度' : '推理强度'}
-      <select aria-label={defaults ? '默认推理强度' : '当前对话推理强度'}
-        disabled={disabled || busy || (defaults && !current)} value={defaults ? draft || '' : value || ''}
-        onChange={(e) => defaults ? setDraft(e.target.value as ThinkingLevel) : onChange?.((e.target.value || undefined) as ThinkingLevel | undefined)}>
-        {!defaults && <option value="">跟随默认{label ? `（${label}）` : ''}</option>}
-        {defaults && !current && <option value="">读取中…</option>}
-        {levels.map(([id, text]) => <option value={id} key={id}>{text} · {id}</option>)}
+  return <div className={`thinking-control${defaults ? ' thinking-defaults' : ''}`}>
+    <label><span>{defaults ? '默认推理' : '推理'}</span>
+      <select aria-label={defaults ? '默认推理' : '推理'}
+        title={note || (defaults ? '新对话的默认推理级别' : '下一条消息的推理级别')}
+        disabled={disabled || busy || (!defaults && !effective) || (defaults && !current)}
+        value={defaults ? draft || '' : effective ? compactLevel(effective) : ''}
+        onChange={(e) => defaults ? setDraft(e.target.value as ThinkingLevel) : onChange?.(e.target.value as ThinkingLevel)}>
+        {!effective && !defaults && <option value="" disabled>—</option>}
+        {defaults && !current && <option value="" disabled>—</option>}
+        {levels.map((level) => <option value={level} key={level}>{level}</option>)}
       </select>
     </label>
-    {defaults && <><button className="btn btn-sm" disabled={busy || !draft || draft === current} onClick={() => void save()}>{busy ? '保存中…' : '保存强度'}</button>
-      <span className="desc">用于跟随默认的对话；可用档位取决于模型。</span></>}
-    {note && <span role="status">{note}</span>}
+    {defaults && <><button className="btn btn-sm" disabled={busy || !draft || draft === current} onClick={() => void save()}>{busy ? '保存中…' : '保存'}</button>
+      <span className="desc">用于未单独设置推理的对话。</span></>}
+    {note && <span className="thinking-note" role="status">{note}</span>}
   </div>;
 }
