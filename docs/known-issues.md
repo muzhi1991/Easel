@@ -74,6 +74,6 @@ bash setup.sh
 
 ## OpenAI 兼容接口的模型切换
 
-Web 保存模型时，按 ID 复用 `models.providers.<provider>.models` 中的定义，保留已有 `input`、`reasoning` 等字段，不再覆盖 `models[0]`。新模型追加定义，默认 `name=id`、`input: ["text", "image"]`、`reasoning: true`，不写 `contextWindow` 或 `maxTokens`；同时向 `agents.defaults.models` 登记空条目，已有别名、参数和运行时设置保持不变。这些默认能力是配置约定，实际支持取决于上游模型。
+Web 保存模型时，按 ID 复用 `models.providers.<provider>.models` 中的定义，保留已有 `input`、`reasoning` 等字段，不再覆盖 `models[0]`。新模型追加定义，默认 `name=id`、`reasoning: true`，不写 `input`（使用 OpenClaw 默认的文字输入）、`contextWindow` 或 `maxTokens`；同时向 `agents.defaults.models` 登记空条目，已有别名、参数和运行时设置保持不变。这些默认能力是配置约定，实际支持取决于上游模型。
 
 OpenAI 兼容接口的 UI 选择仍由现有 `.env` 的 `OPENAI_MODEL` 保存，无需新增配置文件。切换选择后需明确点击「设为主」再保存，才更新 `agents.defaults.model.primary`；仅保存选择不切换实际主模型。图片模型和备用模型引用保持不变。

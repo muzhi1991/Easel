@@ -1637,8 +1637,7 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 models = prov.get('models') if isinstance(prov.get('models'), list) else []
                 # 模型目录按 ID 复用，不能覆盖首项：图片/备用模型也引用同一目录。
                 if not any(isinstance(item, dict) and item.get('id') == model for item in models):
-                    models.append({'id': model, 'name': model,
-                                   'input': ['text', 'image'], 'reasoning': True})
+                    models.append({'id': model, 'name': model, 'reasoning': True})
                     prov['models'] = models
                     changed = True
                 # 自定义供应商没有 OPENAI_MODEL 槽位，仍以首项回显选择；移动完整
