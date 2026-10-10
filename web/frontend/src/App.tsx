@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from './lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
@@ -255,6 +256,7 @@ export default function App() {
     text: string,
     persona: string | undefined,
     attachments: UploadedFile[] = [],
+    thinking?: ThinkingLevel,
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -351,6 +353,7 @@ export default function App() {
       },
       // onHeartbeat：防呆心跳（30s 静默）。只设独立的「未卡住」提示，绝不写 activity/thinking → 不顶掉真实状态。
       (note) => setStreams((p) => (p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
+      thinking,
     );
   }, [appendAssistant, clearStream]);
 
@@ -500,7 +503,7 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments);
+    startStream(sessionId, agentMessage, persona, attachments, cur?.thinking);
   }, [selectedPersona, startStream]);
 
   const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[]) => {
@@ -694,6 +697,10 @@ export default function App() {
           <ChatPage
             key={activeSession.id}
             session={activeSession}
+            onThinkingChange={(thinking) => setSessions((prev) => {
+              const next = prev.map((s) => s.id === activeSession.id ? { ...s, thinking } : s);
+              saveSessions(next); return next;
+            })}
             stream={streams[activeSession.id]}
             onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
             onStop={() => handleStopStream(activeSession.id)}

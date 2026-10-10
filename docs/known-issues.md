@@ -59,3 +59,9 @@ bash setup.sh
 ```
 
 升级后 `easel doctor` 会校验 OpenClaw ≥ 2026.6.11。不升级时安装不再报错，但请求超时受旧版默认超时限制；请确认模型名带 provider 前缀（如 `anthropic/claude-sonnet-4-6`），具体卡在哪一步可看 `easel gateway logs`。
+
+## 对话推理强度
+
+「设置 → 模型配置 → 对话」可保存默认推理强度；对话输入框旁可选择当前会话的强度，或「跟随默认」。会话选择保存在浏览器本地，刷新、重试时沿用；选择在下一次发送时生效，生成期间不可修改。
+
+默认值读取 Easel 实例的 `agents.defaults.thinkingDefault`；未配置时使用 `EASEL_THINKING_LEVEL`，再回退到 `medium`。会话显式选择优先，两种对话传输均使用同一个解析结果。HTTP 接口本身不读取 `reasoning_effort`，因此通过网关 `sessions.patch` 应用强度，再发起同一会话的 HTTP 请求；CLI 使用 `--thinking`。应用失败会报错，不会静默以其他强度继续。可用档位由当前模型和网关决定，选择不支持的档位时需改选。
