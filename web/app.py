@@ -1359,7 +1359,7 @@ def _model_channels() -> dict:
             "sub": "API 供应商",
             "type": "openai", "model": om or "deepseek-chat",
             "baseUrl": ob, "keyMasked": _mask_key(env.get("OPENAI_API_KEY", "")),
-            "role": "主" if primary.startswith(f"{openai_slot}/") else "备",
+            "role": "主" if primary == f"{openai_slot}/{om or 'deepseek-chat'}" else "备",
             "result": "已配置" if ok_key else "缺 key",
         })
     ab = (env.get("ANTHROPIC_BASE_URL") or "").strip()
@@ -1634,13 +1634,27 @@ def _sync_openclaw_chat(provider_updates: dict[str, dict], keep_custom: set[str]
                 prov['apiKey'] = key
                 changed = True
             if model:
-                models = prov.get('models') if isinstance(prov.get('models'), list) and prov.get('models') else [{}]
-                if not isinstance(models[0], dict):
-                    models = [{}]
-                if models[0].get('id') != model:
-                    models[0]['id'] = model
+                models = prov.get('models') if isinstance(prov.get('models'), list) else []
+                # 模型目录按 ID 复用，不能覆盖首项：图片/备用模型也引用同一目录。
+                if not any(isinstance(item, dict) and item.get('id') == model for item in models):
+                    models.append({'id': model, 'name': model,
+                                   'input': ['text', 'image'], 'reasoning': True})
+                    prov['models'] = models
                     changed = True
-                prov['models'] = models
+                # 自定义供应商没有 OPENAI_MODEL 槽位，仍以首项回显选择；移动完整
+                # 定义而非覆盖 ID，保证同样保留所有模型的能力和引用。
+                if pkey not in RESERVED_PROVIDER_KEYS:
+                    selected = next(i for i, item in enumerate(models)
+                                    if isinstance(item, dict) and item.get('id') == model)
+                    if selected:
+                        models.insert(0, models.pop(selected))
+                        changed = True
+                defaults = data.setdefault('agents', {}).setdefault('defaults', {})
+                routes = defaults.setdefault('models', {})
+                model_ref = f'{pkey}/{model}'
+                if model_ref not in routes:
+                    routes[model_ref] = {}
+                    changed = True
         if primary_ref:
             ref = data.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})
             if ref.get('primary') != primary_ref:

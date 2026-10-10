@@ -71,3 +71,9 @@ bash setup.sh
 「拉取模型」和「自测」允许用户指定任意合法 HTTP(S) 模型端点，包括本机、内网和代理 Fake-IP，不再按解析 IP 所属网段拦截。`EASEL_FAKE_IP_ORIGINS` 白名单及启动脚本的自动收集逻辑已移除。请求会携带配置的 API Key 发送到目标地址；URL 格式检查、禁止跟随重定向，以及 Web 写入来源校验仍保留。OpenClaw 独立管理网络策略：如需放开模型请求，设置每个 `models.providers.<id>.request.allowPrivateNetwork: true`；浏览器、网页抓取和定时任务 Webhook 分别设置 `browser.ssrfPolicy`、`tools.web.fetch.ssrfPolicy`、`cron.webhookSsrfPolicy` 下的 `dangerouslyAllowPrivateNetwork: true`，并移除 `blockedHostnames`。实例配置不提交 Git。
 
 当前 OpenClaw 2026.9.8 没有覆盖所有出站请求的总开关。HTTP 输入附件的 URL 下载路径仍固定使用 `allowPrivateNetwork: false`，上述开关不覆盖它；应优先用本地上传或 Base64 输入，不能将配置放开描述成所有底层检查都已移除。
+
+## OpenAI 兼容接口的模型切换
+
+Web 保存模型时，按 ID 复用 `models.providers.<provider>.models` 中的定义，保留已有 `input`、`reasoning` 等字段，不再覆盖 `models[0]`。新模型追加定义，默认 `name=id`、`input: ["text", "image"]`、`reasoning: true`，不写 `contextWindow` 或 `maxTokens`；同时向 `agents.defaults.models` 登记空条目，已有别名、参数和运行时设置保持不变。这些默认能力是配置约定，实际支持取决于上游模型。
+
+OpenAI 兼容接口的 UI 选择仍由现有 `.env` 的 `OPENAI_MODEL` 保存，无需新增配置文件。切换选择后需明确点击「设为主」再保存，才更新 `agents.defaults.model.primary`；仅保存选择不切换实际主模型。图片模型和备用模型引用保持不变。

@@ -264,7 +264,7 @@ def test_save_never_writes_real_openclaw_config(client):
          "baseUrl": "https://api.deepseek.com", "key": "sk-fake-new"}]})
     assert resp.status_code == 200, resp.text[:300]
     data = json.loads(client.openclaw_cfg.read_text(encoding="utf-8"))
-    assert data["models"]["providers"]["openai"]["models"][0]["id"] == "deepseek-flash"
+    assert [m["id"] for m in data["models"]["providers"]["openai"]["models"]] == ["gpt-4o", "deepseek-flash"]
 
 
 # ---- #48 传输层：直连常驻网关提速，但绝不能把会话历史搞丢 ----

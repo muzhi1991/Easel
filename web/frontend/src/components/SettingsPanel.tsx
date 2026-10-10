@@ -1,7 +1,7 @@
 import ThinkingSelect from './ThinkingSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Dispatch, SetStateAction, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import EnvBoard from './EnvBoard';
 import MediaProviders from './MediaProviders';
 import type { JobView } from './EnvBoard';
@@ -360,11 +360,11 @@ export default function SettingsPanel({ onClose }: Props) {
       return left;
     });
 
-  const updateRow = (
-    setRows: Dispatch<SetStateAction<ModelRow[]>>,
-    i: number,
-    patch: Partial<ModelRow>,
-  ) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  // 换模型只是保存选择；必须另点「设为主」才切换实际对话模型。
+  const updateChatRow = (i: number, patch: Partial<ModelRow>) =>
+    setChatRows((rs) => rs.map((r, j) => j === i
+      ? { ...r, ...patch, role: patch.model !== undefined && patch.model !== r.model ? '备' : r.role }
+      : r));
 
   const updateMediaRow = (ch: string, i: number, patch: Partial<ModelRow>) =>
     setMediaRows((m) => ({ ...m, [ch]: (m[ch] || []).map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
@@ -651,7 +651,7 @@ export default function SettingsPanel({ onClose }: Props) {
                       <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing}>自测本通道</button>
                     </div>
                     <ThinkingSelect defaults />
-                    {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow })}
+                    {renderBoard(chatRows, { onRow: updateChatRow, onPrimary: setPrimaryRow, onRemove: removeRow })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
                     {(() => {
                       // 本机 agent 区块：装了 Claude Code / Gemini CLI 并登录过的用户不需要填 API Key。
