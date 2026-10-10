@@ -1385,8 +1385,35 @@ textarea.field { resize: vertical; min-height: 90px; }
 /* 自定义供应商行的协议选择：与行内 mock 输入同风格，宽度收敛 */
 .prow select.proto-sel { min-width: 0; width: 100%; padding: 4px 6px; font-size: 12px; }
 
-.thinking-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
-.thinking-control label { display: flex; align-items: center; gap: 6px; }
-.thinking-control select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; max-width: 190px; }
-.st-panel > .thinking-control { margin: 14px 0; }
-.composer-bar { flex-wrap: wrap; }
+/* Composer utility rail: quiet model identity, one compact editable control. */
+.thinking-control { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.thinking-control label { display: flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--text-secondary); }
+.thinking-control select { font: 12px 'SF Mono', Consolas, monospace; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; cursor: pointer; }
+.thinking-control select:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 2px; }
+.thinking-control select:disabled { opacity: .55; cursor: default; }
+.thinking-defaults { flex-wrap: wrap; margin: 14px 0; }
+.thinking-note { color: var(--text-secondary); font-size: 11px; }
+.composer-bar { justify-content: flex-start; flex-wrap: nowrap; gap: 10px; margin-top: 12px; }
+.composer-bar > .send-btn { margin-left: auto; flex-shrink: 0; }
+.composer-bar > .composer-attach-btn { flex-shrink: 0; min-height: 32px; border-color: transparent; background: transparent; padding: 5px 6px; }
+.composer-hint { text-align: right; font-size: 10px; line-height: 1.5; margin-top: 5px; color: var(--text-tertiary); }
+.chat-model-controls { display: flex; align-items: center; min-width: 0; max-width: calc(100% - 100px); padding: 0 7px 0 10px; min-height: 32px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.chat-current-model { display: flex; align-items: center; gap: 7px; min-width: 0; padding-right: 10px; }
+.model-indicator { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--accent-start); }
+.is-uncertain .model-indicator { background: var(--amber); }
+.chat-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--text); }
+.model-fallback-label { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+.chat-model-controls > .thinking-control { flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 10px; }
+.chat-model-controls .thinking-control select { border: 0; background: transparent; padding: 6px 1px; width: 76px; }
+.chat-model-controls .thinking-control label > span { font-size: 11px; }
+.chat-model-controls .thinking-note { display: none; }
+@media (max-width: 520px) {
+  .composer-bar { gap: 6px; }
+  .composer-bar > .composer-attach-btn { width: 28px; padding: 5px; }
+  .composer-attach-btn > span { display: none; }
+  .chat-model-controls { max-width: calc(100% - 74px); padding-left: 7px; }
+  .chat-current-model { padding-right: 7px; gap: 5px; }
+  .chat-model-controls > .thinking-control { padding-left: 7px; }
+  .chat-model-name { font-size: 11px; }
+  .composer-hint { display: none; }
+}

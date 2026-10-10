@@ -1,4 +1,4 @@
-import ThinkingSelect from './ThinkingSelect';
+import ChatModelControls from './ChatModelControls';
 import { useState, useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import QuestionCards from './QuestionCards';
@@ -163,16 +163,16 @@ export default function ChatPage({ session, stream, onThinkingChange, onSend, on
       <div className="composer-bar">
         <button className="composer-attach-btn" onClick={() => fileInputRef.current?.click()}
           disabled={isStreaming || uploading} title={`添加素材（图片/文档）；超过 ${maxMb}MB 的大文件将自动存为本地素材（不走上传）`}>
-          <IconPlus size={15} /> {uploading ? '上传中…' : '素材'}
+          <IconPlus size={15} /><span>{uploading ? '上传中…' : '素材'}</span>
         </button>
-        <ThinkingSelect value={session.thinking} onChange={onThinkingChange} disabled={isStreaming} />
-        <span className="composer-hint">{isStreaming ? '生成中…' : 'Enter 发送 · Shift+Enter 换行'}</span>
+        <ChatModelControls sessionId={session.id} streaming={isStreaming} thinking={session.thinking} onThinkingChange={onThinkingChange} />
         {isStreaming ? (
           <button className="send-btn" onClick={onStop} title="停止生成"><IconStop size={15} /></button>
         ) : (
           <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading} title="发送"><IconArrowUp size={17} /></button>
         )}
       </div>
+      <div className="composer-hint">{isStreaming ? '生成中…' : 'Enter 发送 · Shift+Enter 换行'}</div>
     </div>
   );
 

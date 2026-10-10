@@ -908,3 +908,12 @@ export function fetchThinking(): Promise<{ thinking: ThinkingLevel }> {
 export function saveThinking(thinking: ThinkingLevel): Promise<{ thinking: ThinkingLevel }> {
   return request('/api/settings/thinking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thinking }) });
 }
+
+export interface ChatModelStatus {
+  model: string;
+  modelRef: string;
+  source: 'session' | 'default' | 'unavailable';
+}
+export function fetchChatModel(sessionId: string): Promise<ChatModelStatus> {
+  return request(`/api/chat/model?sessionId=${encodeURIComponent(sessionId)}`);
+}

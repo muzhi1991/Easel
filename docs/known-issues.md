@@ -62,7 +62,7 @@ bash setup.sh
 
 ## 对话推理强度
 
-「设置 → 模型配置 → 对话」可保存默认推理强度；对话输入框旁可选择当前会话的强度，或「跟随默认」。会话选择保存在浏览器本地，刷新、重试时沿用；选择在下一次发送时生效，生成期间不可修改。
+「设置 → 模型配置 → 对话」可保存默认推理强度；对话输入框底部将只读模型名与「推理」组合展示，可选择 `max / high / medium / low / off`。未单独选择时显示并使用默认值；旧的 minimal 映射到 low，xhigh/ultra 映射到 max，adaptive 映射到 high，转换后的会话值随下一条消息发送。会话选择保存在浏览器本地，刷新、重试时沿用；选择在下一次发送时生效，生成期间不可修改。
 
 默认值读取 Easel 实例的 `agents.defaults.thinkingDefault`；未配置时使用 `EASEL_THINKING_LEVEL`，再回退到 `medium`。会话显式选择优先，两种对话传输均使用同一个解析结果。HTTP 接口本身不读取 `reasoning_effort`，因此通过网关 `sessions.patch` 应用强度，再发起同一会话的 HTTP 请求；CLI 使用 `--thinking`。应用失败会报错，不会静默以其他强度继续。可用档位由当前模型和网关决定，选择不支持的档位时需改选。
 
@@ -77,3 +77,5 @@ bash setup.sh
 Web 保存模型时，按 ID 复用 `models.providers.<provider>.models` 中的定义，保留已有 `input`、`reasoning` 等字段，不再覆盖 `models[0]`。新模型追加定义，默认 `name=id`、`reasoning: true`，不写 `input`（使用 OpenClaw 默认的文字输入）、`contextWindow` 或 `maxTokens`；同时向 `agents.defaults.models` 登记空条目，已有别名、参数和运行时设置保持不变。这些默认能力是配置约定，实际支持取决于上游模型。
 
 OpenAI 兼容接口的 UI 选择仍由现有 `.env` 的 `OPENAI_MODEL` 保存，无需新增配置文件。切换选择后需明确点击「设为主」再保存，才更新 `agents.defaults.model.primary`；仅保存选择不切换实际主模型。图片模型和备用模型引用保持不变。
+
+对话工具栏的模型名通过网关只读查询当前会话的解析结果；新会话使用配置的主模型。设置切换、会话切换、生成状态变化和窗口重新获得焦点时刷新，并每 15 秒更新。网关不可用时，明确标记为「默认」，悬停可查看完整模型引用和状态。该展示不是每条历史回复的模型审计记录。
