@@ -1384,3 +1384,9 @@ textarea.field { resize: vertical; min-height: 90px; }
 
 /* 自定义供应商行的协议选择：与行内 mock 输入同风格，宽度收敛 */
 .prow select.proto-sel { min-width: 0; width: 100%; padding: 4px 6px; font-size: 12px; }
+
+.thinking-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.thinking-control label { display: flex; align-items: center; gap: 6px; }
+.thinking-control select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; max-width: 190px; }
+.st-panel > .thinking-control { margin: 14px 0; }
+.composer-bar { flex-wrap: wrap; }

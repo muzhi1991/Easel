@@ -1,3 +1,4 @@
+import ThinkingSelect from './ThinkingSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Dispatch, SetStateAction, ReactNode } from 'react';
@@ -649,6 +650,7 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing}>自测本通道</button>
                     </div>
+                    <ThinkingSelect defaults />
                     {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow })}
                     <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
                     {(() => {

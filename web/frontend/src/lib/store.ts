@@ -1,4 +1,4 @@
-import type { UploadedFile, ChatQuestion } from './api';
+import type { UploadedFile, ChatQuestion, ThinkingLevel } from './api';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -10,6 +10,7 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  thinking?: ThinkingLevel;
   id: string;
   title: string;
   messages: ChatMessage[];

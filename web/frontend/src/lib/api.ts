@@ -583,6 +583,7 @@ export function streamChat(
   attachments: UploadedFile[] = [],
   onQuestion?: (q: ChatQuestion) => void,
   onHeartbeat?: (note: string) => void,
+  thinking?: ThinkingLevel,
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -670,7 +671,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, thinking }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -898,4 +899,12 @@ export function fetchAvailableModels(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ baseUrl, key, protocol, slot, name }),
   });
+}
+
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'adaptive' | 'max' | 'ultra';
+export function fetchThinking(): Promise<{ thinking: ThinkingLevel }> {
+  return request('/api/settings/thinking');
+}
+export function saveThinking(thinking: ThinkingLevel): Promise<{ thinking: ThinkingLevel }> {
+  return request('/api/settings/thinking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thinking }) });
 }

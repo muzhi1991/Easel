@@ -24,6 +24,7 @@ import uuid
 from contextlib import asynccontextmanager
 import ipaddress
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,12 +93,36 @@ CHAT_TRANSPORT = os.environ.get("EASEL_CHAT_TRANSPORT", "http").strip().lower()
 from easel.openclaw_workspace import config_path as _oc_config_path, state_dir as _oc_state_dir
 OPENCLAW_SESSIONS_DIR = _oc_state_dir() / "agents" / "main" / "sessions"
 
-# 思考档位（每轮 --thinking）。前后端已完整支持展示思考：后端把 thinking_delta 转成 SSE
-# `thinking` 事件，前端 MessageBubble 渲染「💭 思考过程」并在流式结束后持久保留。面板里有没有
-# 内容取决于网关——支持 extended-thinking 的网关会按档位回传思考流；不支持的（如内网 codewiz，
-# 实测 transcript 里 assistant 只有 text 块、thinking 恒为 0）面板留空，调高档位也不会有内容。
-# 默认 medium：让支持思考的部署直接显示较完整思考；EASEL_THINKING_LEVEL 可覆盖（low 提速 / high 更详尽）。
-THINKING_LEVEL = (os.environ.get("EASEL_THINKING_LEVEL", "").strip() or "medium")
+# One resolver for both transports; explicit conversation choice wins over defaults.
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max", "ultra"]
+THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max", "ultra")
+
+
+def _thinking_default() -> str:
+    try:
+        cfg = json.loads(_oc_config_path().read_text(encoding="utf-8"))
+        level = cfg.get("agents", {}).get("defaults", {}).get("thinkingDefault")
+        if level in THINKING_LEVELS:
+            return level
+    except (OSError, ValueError):
+        pass
+    level = os.environ.get("EASEL_THINKING_LEVEL", "").strip()
+    return level if level in THINKING_LEVELS else "medium"
+
+
+def _apply_http_thinking(session_key: str, level: str) -> None:
+    # OpenClaw's HTTP endpoint ignores reasoning_effort. Patch the same session
+    # under the caller's session lock before starting the HTTP turn instead.
+    if GatewayClient is None:
+        raise RuntimeError("无法设置推理强度：网关连接不可用")
+    client = GatewayClient()
+    try:
+        client.set_thinking(session_key, level)
+    except Exception as exc:
+        raise RuntimeError(f"推理强度 {level} 应用失败：{exc}") from exc
+    finally:
+        client.close()
+
 
 # gateway 进程把原始事件流（token/thinking/收尾）写到的**单个共享文件**。
 # 关键：`openclaw agent` 只是瘦客户端，没有 --raw-stream 标志——只有常驻 gateway 按它自己
@@ -884,13 +909,13 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
     }
 
 
-def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None) -> str:
+def run_agent_sync(msg: str, timeout: int = TIMEOUT_DIRECT, session_id: str | None = None, thinking: str | None = None) -> str:
     sk = session_id or f'web-{int(time.time() * 1000)}'
     _heal_openclaw_session(sk)   # 清洗历史里无签名 thinking 块，防回放失效
     # 钉死 --session-id 让 OpenClaw 每轮续同一 transcript（防跨天空闲后新起空会话丢历史，见 _openclaw_session_id）
     cmd = openclaw_base_cmd() + ['--profile', OPENCLAW_PROFILE, 'agent', '--agent', 'main',
            '--session-key', f'agent:main:{sk}', '--session-id', _openclaw_session_id(sk),
-           '--thinking', THINKING_LEVEL,
+           '--thinking', thinking or _thinking_default(),
            '--timeout', str(timeout), '--message', msg]
     # 跨进程锁：同一会话同时刻只跑一个 openclaw，防并发 takeover 崩溃（rc=1）
     xlock = _CrossProcLock(sk)
@@ -1478,6 +1503,31 @@ def _model_channels() -> dict:
 async def api_settings_models():
     """模型通道：chat / transcribe（含可编辑的原值；key 只回脱敏）。"""
     return _model_channels()
+
+
+class ThinkingSettingsRequest(BaseModel):
+    thinking: ThinkingLevel
+
+
+@app.get("/api/settings/thinking")
+async def api_thinking_settings():
+    return {"thinking": _thinking_default()}
+
+
+@app.post("/api/settings/thinking")
+def api_save_thinking_settings(req: ThinkingSettingsRequest):
+    # Use the supported config writer: preserve unrelated config and validate it.
+    env = _proxy_env()
+    env.update(OPENCLAW_CONFIG_PATH=str(_oc_config_path()), OPENCLAW_STATE_DIR=str(_oc_state_dir()))
+    try:
+        result = subprocess.run(openclaw_base_cmd() + ["--profile", OPENCLAW_PROFILE,
+            "config", "set", "agents.defaults.thinkingDefault", req.thinking],
+            capture_output=True, text=True, timeout=30, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(503, "推理强度保存失败，请检查网关配置") from exc
+    if result.returncode != 0:
+        raise HTTPException(400, "推理强度保存失败，当前网关可能不支持该档位")
+    return {"thinking": _thinking_default()}
 
 
 # Generic media extension seam. Descriptors come only from installed trusted adapters.
@@ -2185,6 +2235,7 @@ class AttachmentRef(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    thinking: ThinkingLevel | None = None
     message: str
     persona: str | None = None
     sessionId: str | None = None
@@ -2549,6 +2600,7 @@ async def api_chat_stream(req: ChatRequest):
     """
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     message = _chat_message(req)
+    thinking = req.thinking or _thinking_default()
 
     # supervisor（跑 openclaw run）与 forward（转发 SSE 给浏览器）之间的事件通道。
     # 关键：run 跑在独立后台任务里，客户端断开只结束 forward，不取消 supervisor →
@@ -2612,6 +2664,7 @@ async def api_chat_stream(req: ChatRequest):
             saw_done = False
             got_text = False
             try:
+                await asyncio.to_thread(_apply_http_thinking, f"agent:main:{sk}", thinking)
                 import httpx as _httpx
                 timeout = _httpx.Timeout(TIMEOUT_CHAT + 60, connect=10)
                 async with _httpx.AsyncClient(timeout=timeout) as client:
@@ -2682,7 +2735,7 @@ async def api_chat_stream(req: ChatRequest):
         cmd = openclaw_base_cmd() + [
             "--profile", OPENCLAW_PROFILE, "agent", "--agent", "main",
             "--session-key", f"agent:main:{sk}", "--session-id", _openclaw_session_id(sk),
-            "--thinking", THINKING_LEVEL,
+            "--thinking", thinking,
             "--timeout", str(TIMEOUT_CHAT), "--message", message,
         ]
         env = _proxy_env()
@@ -3040,6 +3093,7 @@ async def api_chat_stream(req: ChatRequest):
                     lf.write(json.dumps({
                         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "session": sk,
+                        "thinking_level": thinking,
                         "rc": proc.poll(),
                         "stop_reason": run_info["stop_reason"],
                         "last_ev": run_info["last_ev"],
@@ -3217,7 +3271,7 @@ async def api_chat(req: ChatRequest):
     message = _chat_message(req)
     loop = asyncio.get_event_loop()
     # chat 可能中途触发制作层长任务 → 用 TIMEOUT_CHAT，与流式 /api/chat/stream 一致（勿用 300s）
-    result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT, req.sessionId)
+    result = await loop.run_in_executor(None, run_agent_sync, message, TIMEOUT_CHAT, req.sessionId, req.thinking)
     return {"response": result}
 
 
