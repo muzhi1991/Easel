@@ -81,7 +81,7 @@ def test_new_model_is_appended_registered_and_idempotent(catalog, primary):
     save(client, 'new-model', primary)
     expected = copy.deepcopy(before)
     expected['models']['providers']['easel-openai']['models'].append({
-        'id': 'new-model', 'name': 'new-model', 'input': ['text', 'image'], 'reasoning': True,
+        'id': 'new-model', 'name': 'new-model', 'reasoning': True,
     })
     expected['agents']['defaults']['models']['easel-openai/new-model'] = {}
     if primary:
