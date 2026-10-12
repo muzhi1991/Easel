@@ -194,6 +194,14 @@ export default function App() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
 
+  // Other pages may choose a different persona for their next task. Returning to
+  // a conversation restores its binding, including general mode (no persona).
+  useEffect(() => {
+    if (currentPage === 'chat' && activeSession) {
+      setSelectedPersona(activeSession.persona || '');
+    }
+  }, [currentPage, activeSession?.id, activeSession?.persona]);
+
   // 最新 sessions 的 ref，供回调里读取而不必进依赖数组（避免闭包过期/频繁重建）
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
@@ -501,7 +509,7 @@ export default function App() {
     const agentMessage = (legacyAgentText || displayText).trim();
     if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId]) return;
     const cur = sessionsRef.current.find((s) => s.id === sessionId);
-    const persona = cur?.persona || selectedPersona || undefined;
+    const persona = cur ? cur.persona : selectedPersona || undefined;
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id !== sessionId) return s;
@@ -707,7 +715,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             apiDirect={apiDirect}
-            onNavigate={setCurrentPage}
+            onNavigate={(page) => page === 'chat' ? handleNewChat() : setCurrentPage(page)}
             onUseTopic={handleUseTopic}
           />
         );
@@ -771,8 +779,9 @@ export default function App() {
 
   const handlePersonaChange = useCallback((persona: string) => {
     setSelectedPersona(persona);
-    setCurrentPage('chat');
+    if (currentPage !== 'chat') return;
     const cur = sessionsRef.current.find((s) => s.id === activeSessionId);
+    if (cur && (cur.persona || '') === persona) return;
     if (cur && cur.messages.length === 0) {
       setSessions((prev) => {
         const updated = prev.map((s) =>
@@ -789,7 +798,7 @@ export default function App() {
       return updated;
     });
     setActiveSessionId(newSession.id);
-  }, [activeSessionId]);
+  }, [activeSessionId, currentPage]);
 
   return (
     <div className="app-layout">

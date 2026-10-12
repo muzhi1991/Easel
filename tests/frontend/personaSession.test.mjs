@@ -21,10 +21,11 @@ const { outputText } = ts.transpileModule(`const ${declaration.getText(parsed)};
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
 });
 
-function setup(sessions, activeSessionId) {
-  const state = { sessions, activeSessionId, selectedPersona: undefined, saved: undefined };
+function setup(sessions, activeSessionId, currentPage = 'chat') {
+  const state = { sessions, activeSessionId, selectedPersona: undefined, saved: undefined, page: currentPage };
   const changePersona = runInNewContext(outputText, {
     activeSessionId,
+    currentPage,
     sessionsRef: { current: sessions },
     useCallback: callback => callback,
     setSelectedPersona: persona => { state.selectedPersona = persona; },
@@ -77,4 +78,27 @@ test('without an active conversation, persona selection safely creates one', () 
   assert.equal(state.sessions.length, 1);
   assert.equal(state.sessions[0].persona, '新画像');
   assert.equal(state.activeSessionId, 'new-session');
+});
+
+for (const page of ['dashboard', 'skills', 'outputs', 'accounts', 'profile', 'publish', 'breakdown']) {
+  test(`switching persona on ${page} stays on the page and preserves conversations`, () => {
+    const original = { id: 'original', persona: '旧画像', messages: [{ role: 'user', content: '历史' }] };
+    const { state, changePersona } = setup([original], original.id, page);
+    changePersona('新画像');
+    assert.equal(state.page, page);
+    assert.equal(state.selectedPersona, '新画像');
+    assert.equal(state.activeSessionId, original.id);
+    assert.equal(state.sessions.length, 1);
+    assert.equal(state.sessions[0], original);
+    assert.equal(state.saved, undefined);
+  });
+}
+
+test('selecting the same persona does not create a duplicate conversation', () => {
+  const original = { id: 'original', persona: '同一画像', messages: [{ role: 'user', content: '历史' }] };
+  const { state, changePersona } = setup([original], original.id);
+  changePersona('同一画像');
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.activeSessionId, original.id);
+  assert.equal(state.sessions[0], original);
 });
