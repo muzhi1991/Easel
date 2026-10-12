@@ -45,6 +45,25 @@ Easel is an open-source content workspace for social media creators. It connects
 
 Think of Easel as a content partner that remembers your positioning, audience, voice, platform constraints, preferences, and past performance. It stays with you from trend discovery through publishing, then carries what it learns into the next creation cycle.
 
+### Local OpenAI-Compatible Gateways
+
+Configure an independent gateway in `.env`:
+
+```dotenv
+EASEL_DIRECT_API_BASE_URL=http://localhost:50288/v1
+EASEL_DIRECT_API_MODEL=your-model-id
+EASEL_DIRECT_API_KEY=your-real-gateway-key
+```
+
+Use a base URL including `/v1`, not the full `/chat/completions` URL. Leave the key empty for gateways without authentication.
+
+- `bash setup.sh` uses OpenClaw by default. A complete independent configuration creates the `local-api` provider with OpenClaw's tool runtime and permits requests to the configured private gateway. The model must support tool calling. Configure `.env` before installation; there is no terminal model-selection wizard.
+- `bash setup.sh --api` skips OpenClaw installation, skills synchronization, and Gateway startup. Alternatively, select **API direct** in the Web model settings, or set `EASEL_CHAT_TRANSPORT=api` manually.
+- Direct mode supports streaming chat, separate multi-turn history, profiles, text/image attachments, stop, and reconnection. It cannot execute local tools, skills, or publishing. Start a new conversation after changing modes.
+- Direct configuration only reads `EASEL_DIRECT_API_*`; it never falls back to `OPENAI_*`. CLI `chat`, `ping`, and `doctor` recognize direct mode. `ping` verifies actual connectivity; a configured badge alone does not.
+
+These installer options apply to Linux/macOS `setup.sh`. Windows users can configure direct mode in `.env` or Web settings.
+
 Easel promotional demo:
 
 https://github.com/user-attachments/assets/4dd060dc-53dd-4bb2-99a3-e65ab6f65166
@@ -174,13 +193,40 @@ easel web
 
 > If you see `easel: command not found`, the virtual environment is not activated. You can also run it by full path without activating, e.g. `.venv/bin/easel doctor` (Windows: `.venv\Scripts\easel.exe doctor`).
 
-`bash setup.sh` is a rerunnable guided installer. It detects and reuses an existing local OpenClaw
+For native Windows 10/11, run the following in PowerShell; WSL and Bash are not required:
+
+```powershell
+git clone https://github.com/ZJU-REAL/Easel.git
+cd Easel
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup.ps1
+.\.venv\Scripts\easel.exe doctor
+.\.venv\Scripts\easel.exe web
+```
+
+The Windows installer uses `winget` to install missing system tools when available, creates `.venv`, installs Python and frontend dependencies, builds the Web UI, and installs Playwright Chromium. Easel uses an isolated `easel` OpenClaw profile. Windows PowerShell 5.1 is supported. Native installation and the Web/CLI entry points are available; broader Windows compatibility across individual skills and browser publishing is still being improved.
+
+`bash setup.sh` is a rerunnable installer. It detects and reuses an existing local OpenClaw
 installation without touching `~/.openclaw/`; Easel uses its isolated `~/.openclaw-easel/` profile.
-When an existing OpenClaw default model is found, the installer asks whether to reuse its model name.
-If no model is configured, it interactively asks for an Anthropic API key and model name. You may also
-copy `.env.example` and fill it in before running the installer.
+
+**Configure your model API key in the browser — the installer no longer asks for it in the terminal.**
+After installing, run `easel web`; on first open it takes you straight to *Settings → Model config*.
+Enter your key and save, and Easel writes the OpenClaw configuration and restarts the gateway for you
+— no need to rerun `setup.sh`. The panel can also list a provider's available models and run a
+connectivity self-test, neither of which the old terminal prompt could do. Alternatively, copy
+`.env.example`, fill in a key, and run `easel doctor` to re-check.
+
+The installer is fully non-interactive apart from one question (whether to create `.venv`, which takes
+its default when stdin is not a TTY), so it is safe for CI. Non-fatal problems — FFmpeg, Chromium,
+gateway startup, missing model config — are collected into a summary at the end and written to
+`outputs/_install/last-install.json` for `easel doctor` to repeat; the install itself still exits 0.
+Set `EASEL_SETUP_STRICT=1` to turn those warnings back into hard failures.
 
 Open `http://localhost:7860` for the Web workspace. Run `easel doctor` to check the environment and `easel ping` to verify the gateway and Agent connection.
+
+When Easel runs on a server accessed through VSCode Remote SSH, forward server port `7860`
+in VSCode's Ports panel and open the displayed local forwarded address; the local port may differ.
+The server's `localhost` is not your computer's. Do not expose an unauthenticated workspace publicly.
 
 The installer installs the Python dependencies required by the Web UI, media processing, and browser publishing:
 
@@ -200,6 +246,21 @@ CLAUDE_MODEL=anthropic/claude-sonnet-4-6
 ```
 
 `.env.example` also documents optional video, music, voice, and Anthropic-compatible provider settings. Configure only the capabilities you use. Missing media-provider credentials do not prevent chat, planning, or text creation.
+
+Custom chat providers in Web Settings expose a “该模型会思考” (reasoning-capable) checkbox.
+Enabling it writes `reasoning: true`; OpenAI-compatible providers also offer a thinking format
+(OpenAI, DeepSeek, etc.) that must match the upstream API. Native Anthropic uses its own format.
+New rows default to off, while existing declarations are shown. Disabling reasoning writes
+`reasoning: false` and removes only reasoning-related compatibility keys, preserving other
+capabilities. Omitting `thinking` from the save API preserves existing declarations; enabling
+it preserves existing effort mappings rather than guessing supported effort levels.
+The format is stored as OpenClaw's `compat.thinkingFormat`; actual wire parameters depend
+on its version and model adapter. For example, OpenClaw 2026.9.8 may still send only
+`reasoning_effort` for generic custom models; this is not an arbitrary dialect converter.
+This declares capability, not verified upstream support, and does not override
+`EASEL_THINKING_LEVEL=off`. The switch is not available in direct API mode.
+For a current model explicitly marked `reasoning: false`, Web uses `--thinking off`
+when invoking the OpenClaw CLI rather than requesting an unsupported `medium` level.
 
 | Capability | Configuration | Additional dependency |
 |---|---|---|

@@ -3,7 +3,8 @@ import { fetchChatModel } from '../lib/api';
 import type { ChatModelStatus, ThinkingLevel } from '../lib/api';
 import ThinkingSelect from './ThinkingSelect';
 
-export default function ChatModelControls({ sessionId, streaming, thinking, onThinkingChange }: {
+export default function ChatModelControls({ sessionId, streaming, thinking, onThinkingChange, apiDirect = false }: {
+  apiDirect?: boolean;
   sessionId: string;
   streaming: boolean;
   thinking?: ThinkingLevel;
@@ -34,7 +35,7 @@ export default function ChatModelControls({ sessionId, streaming, thinking, onTh
       window.removeEventListener('easel-model-config', refresh);
       window.removeEventListener('focus', refresh);
     };
-  }, [sessionId, streaming]);
+  }, [sessionId, streaming, apiDirect]);
   const uncertain = failed || status?.source === 'unavailable';
   const title = failed ? '模型读取失败，请检查网关连接' : status?.source === 'unavailable'
     ? `网关暂不可用，显示配置中的主模型：${status.modelRef}`
@@ -45,6 +46,6 @@ export default function ChatModelControls({ sessionId, streaming, thinking, onTh
       <span className="chat-model-name">{status?.model || (failed ? '模型不可用' : '读取模型…')}</span>
       {status?.source === 'unavailable' && <span className="model-fallback-label">默认</span>}
     </div>
-    <ThinkingSelect value={thinking} onChange={onThinkingChange} disabled={streaming} />
+    {!apiDirect && <ThinkingSelect value={thinking} onChange={onThinkingChange} disabled={streaming} />}
   </div>;
 }
