@@ -35,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+import login_qr
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快手已接入，注册表见 _READBACK_VERIFIERS）
 import human_pace  # noqa: E402  人类节奏（提交前双停顿；EASEL_PACE_SKIP=1 跳过）
@@ -231,7 +232,14 @@ PLATFORMS: dict[str, dict] = {
         "publish_url": "https://zhuanlan.zhihu.com/write",
         "profile": "ZhihuProfile",
         "login_check": ".AppHeader-profile, .AppHeader-userInfo",
+        "login_strict": True,
         "logged_out_selector": ".SignContainer, .Login-content, button:has-text('登录')",
+        "login_qr_switch": "button:has-text('扫码登录'), [role='tab']:has-text('扫码登录'), "
+                           ".SignFlow-qrcodeTab, .SignFlow-tab--qrcode, .SignFlow-switch:has-text('扫码')",
+        "login_qr_selector": ".Qrcode-img, .SignFlow-qrcode, .SignFlowQRCode, "
+                             "[class*='qrcode' i], img[src*='qr' i], canvas",
+        "qr_loaded": ".Qrcode-img, [class*='qrcode' i] img, [class*='qrcode' i] canvas, canvas",
+        "strict_login_qr": True,
         "me_name_selector": ".AppHeader-profile .name, .ProfileHeader-name, .AppHeader-userInfo .name",
         "me_avatar_selector": ".AppHeader-profile img[src], .Avatar[src]",
         "steps": [
@@ -261,6 +269,19 @@ LAUNCH_ARGS = [
     "--disable-features=TranslateUI,BackForwardCache",
     "--mute-audio", "--no-first-run", "--no-default-browser-check",
 ]
+
+
+def _block_heavy(context, platform: str) -> None:
+    if platform != "weixin-channels":
+        return
+
+    def handle_route(route, request):
+        if request.resource_type in {"media", "font"}:
+            route.abort()
+        else:
+            route.continue_()
+
+    context.route("**/*", handle_route)
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -1019,7 +1040,11 @@ def _crop_qr(page, qr_out, cfg) -> None:
     """把登录二维码裁出来单独存图（而非整页）。遍历平台配置 + 常见选择器的所有候选，
     用 _score_qr_el 挑「最像二维码」的那个（base64/canvas 本体 + 接近正方形 + 尺寸合适），
     而不是遇到第一个宽松方形就用；都不中才退回整页。
+    strict_login_qr 平台则检测图案并裁剪，找不到实际二维码时明确报错，不退回整页。
     ⚠️ 调用前应先等二维码渲染（见 cmd_login_qr 的 qr_loaded 等待），否则可能截到空框。"""
+    if cfg.get("strict_login_qr"):
+        login_qr.capture_qr(page, qr_out, cfg["login_qr_selector"])
+        return
     cands: list[str] = []
     if cfg.get("login_qr_selector"):  # 拆逗号逐个试，保证具体选择器优先于容器
         cands += [s.strip() for s in cfg["login_qr_selector"].split(",") if s.strip()]
@@ -1121,11 +1146,13 @@ def cmd_login_qr(a) -> int:
 
     login_state.write_status(sf, "starting")
     with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
-            str(profile), headless=True, locale="zh-CN",
-            args=LAUNCH_ARGS + ["--no-proxy-server"])
-        page = browser.pages[0] if browser.pages else browser.new_page()
+        browser = None
         try:
+            browser = p.chromium.launch_persistent_context(
+                str(profile), headless=True, locale="zh-CN",
+                args=LAUNCH_ARGS + ["--no-proxy-server"])
+            page = browser.pages[0] if browser.pages else browser.new_page()
+            _block_heavy(browser, a.platform)
             page.goto(cfg["login_url"], wait_until="domcontentloaded")
             # 给客户端 redirect + 登录态渲染时间：已登录常从入口页跳到 /profile 等，
             # 固定 1.2s 经常不够（快手实测 → 误判未登录去截整页）。等 login_check 出现最多 6s。
@@ -1142,9 +1169,10 @@ def cmd_login_qr(a) -> int:
             for step in cfg.get("login_prep", []):
                 try:
                     if "click" in step:
-                        el = page.query_selector(step["click"])
-                        if el:
-                            el.click()
+                        for el in page.query_selector_all(step["click"]):
+                            if el.is_visible():
+                                el.click(timeout=3000)
+                                break
                     if "wait" in step:
                         page.wait_for_timeout(step["wait"])
                 except Exception:
@@ -1153,7 +1181,17 @@ def cmd_login_qr(a) -> int:
             # 截二维码为 PNG。视频号等把码放在跨域 iframe 里（主页面找不到）→ 截 iframe 元素本体；
             # 其余平台在主页面异步渲染（base64/canvas）→ 先等渲染再按打分裁剪。统一走 _capture_qr。
             qr_out.parent.mkdir(parents=True, exist_ok=True)
-            _capture_qr(page, qr_out, cfg)
+            try:
+                if cfg.get("login_qr_switch"):
+                    login_qr.prepare_qr(page, qr_out, cfg["login_qr_selector"], cfg["login_qr_switch"])
+                else:
+                    _capture_qr(page, qr_out, cfg)
+            except Exception:
+                if not _is_logged_in(page, cfg):
+                    raise
+                login_state.write_status(sf, "success", "已登录")
+                print(f"✅ {cfg['name']} 已登录（登录态在持久化目录）")
+                return 0
             login_state.write_status(sf, "qr_ready", f"扫码登录 {cfg['name']}", qr=str(qr_out))
             print(f"📱 {cfg['name']} 登录页/二维码已保存：{qr_out}", file=sys.stderr)
             print(f"⏳ 等待扫码（最长 {timeout_s}s）...", file=sys.stderr)
@@ -1161,6 +1199,7 @@ def cmd_login_qr(a) -> int:
             confirmed = False
             tick = 0
             deadline = time.time() + timeout_s
+            next_refresh = time.monotonic() + 5
             while time.time() < deadline:
                 tick += 1
                 if _is_logged_in(page, cfg):
@@ -1176,6 +1215,12 @@ def cmd_login_qr(a) -> int:
                     if _probe_logged_in(browser, cfg):
                         confirmed = True
                         break
+                if cfg.get("strict_login_qr") and time.monotonic() >= next_refresh:
+                    try:
+                        login_qr.capture_qr(page, qr_out, cfg["login_qr_selector"], attempts=1)
+                    except RuntimeError:
+                        pass
+                    next_refresh = time.monotonic() + 5
                 page.wait_for_timeout(_LOGIN_POLL_MS)
             if confirmed:
                 login_state.write_status(sf, "success", "登录成功")
@@ -1193,7 +1238,8 @@ def cmd_login_qr(a) -> int:
             print(f"❌ {cfg['name']} 登录异常：{e}", file=sys.stderr)
             return 1
         finally:
-            browser.close()
+            if browser is not None:
+                browser.close()
 
 
 def cmd_publish(a) -> int:
@@ -1258,6 +1304,7 @@ def cmd_whoami(a) -> int:
                 args=LAUNCH_ARGS + ["--no-proxy-server"])
             page = browser.pages[0] if browser.pages else browser.new_page()
             try:
+                _block_heavy(browser, a.platform)
                 page.goto(cfg["publish_url"], wait_until="domcontentloaded", timeout=30000)
                 _settle_login(page, cfg)  # 等客户端跳转落定，避免 SPA 未跳转期误判已登录
                 logged = _is_logged_in(page, cfg)
@@ -1421,6 +1468,7 @@ def cmd_selftest(_a) -> int:
 
 
 def main() -> int:
+    login_state.configure_stdio()
     ap = argparse.ArgumentParser(
         description="通用浏览器发布框架（Playwright，配置驱动，登录态持久化）",
         formatter_class=argparse.RawDescriptionHelpFormatter)

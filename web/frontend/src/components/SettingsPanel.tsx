@@ -7,13 +7,17 @@ import MediaProviders from './MediaProviders';
 import type { JobView } from './EnvBoard';
 import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
-  fetchModelChannels, runChannelSelftest, saveModelConfig,
+  fetchModelChannels, runChannelSelftest, saveModelConfig, saveChatTransport,
   fetchLocalAgents, enableLocalAgent, fetchAvailableModels,
 } from '../lib/api';
 import type { EnvTool, ModelRow, SelftestResult, LocalAgentInfo } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
 
-interface Props { onClose: () => void; }
+interface Props {
+  onClose: () => void;
+  /** 非空时在面板顶部显示一条提示条。首开未配置模型时由 App 传入。 */
+  banner?: string;
+}
 
 type Sec = 'model' | 'env' | 'more';
 type Chan = 'chat' | 'transcribe' | 'speech' | 'image' | 'video' | 'music' | 'ocr';
@@ -57,7 +61,7 @@ const hhmm = (ts: number) => {
 };
 
 /** 设置（统一入口）：竖＝功能分类（模型配置 / 环境安装 / 更多设置），横＝模型六通道。 */
-export default function SettingsPanel({ onClose }: Props) {
+export default function SettingsPanel({ onClose, banner = '' }: Props) {
   const [sec, setSec] = useState<Sec>('model');
   const [chan, setChan] = useState<Chan>('chat');
 
@@ -150,6 +154,7 @@ export default function SettingsPanel({ onClose }: Props) {
   // ── 模型配置（真值只读 + 真自测） ────────────────────────
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
   const [chatPrimary, setChatPrimary] = useState('');
+  const [transport, setTransport] = useState<'api' | 'openclaw'>('openclaw');
   const [transRows, setTransRows] = useState<ModelRow[]>([]);
   const [mediaRows, setMediaRows] = useState<Record<string, ModelRow[]>>({});
   const [modelLoading, setModelLoading] = useState(true);
@@ -177,6 +182,8 @@ export default function SettingsPanel({ onClose }: Props) {
   });
   // 自定义下拉面板的展开状态与收起检测
   const [openDd, setOpenDd] = useState<Record<number, boolean>>({});
+  const [protoDd, setProtoDd] = useState<Record<number, boolean>>({});
+  const protoRefs = useRef<Record<number, HTMLSpanElement | null>>({});
   const modelCellRefs = useRef<Record<number, HTMLSpanElement | null>>({});
 
   useEffect(() => {
@@ -231,6 +238,7 @@ export default function SettingsPanel({ onClose }: Props) {
         if (!alive) return;
         setChatRows(d.channels.chat.rows || []);
         setChatPrimary(d.primary);
+        setTransport(d.transport || 'openclaw');
         setTransRows(d.channels.transcribe.rows || []);
         setMediaRows({
           image: d.channels.image?.rows || [],
@@ -266,6 +274,22 @@ export default function SettingsPanel({ onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState('');
 
+  const changeTransport = async (value: 'api' | 'openclaw') => {
+    setSaving(true);
+    try {
+      const result = await saveChatTransport(value);
+      setTransport(result.transport || value);
+      setChatPrimary(result.primary);
+      window.dispatchEvent(new Event('easel-model-config'));
+      setChatRows(result.channels.chat.rows || []);
+      setSavedNote('✓ 模式已切换，请新建对话；未保存的通道草稿已重新加载');
+    } catch (error) {
+      setSavedNote(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveCurrent = useCallback(async () => {
     const rows = chan === 'chat' ? chatRows : chan === 'transcribe' ? transRows : (mediaRows[chan] || []);
     const payload = rows
@@ -282,6 +306,9 @@ export default function SettingsPanel({ onClose }: Props) {
         primary: r.role === '主',
         // 协议只对自定义供应商有意义；其余行后端不读这个字段
         protocol: r.slot === 'custom' ? (r.protocol || 'openai') : undefined,
+        thinking: r.slot === 'custom' ? r.thinking : undefined,
+        thinkingFormat: r.slot === 'custom' && r.thinking && r.protocol !== 'anthropic'
+          ? (r.thinkingFormat || undefined) : undefined,
       }));
     if (!payload.length) {
       setSavedNote('当前通道没有可保存的配置');
@@ -318,7 +345,9 @@ export default function SettingsPanel({ onClose }: Props) {
 
   // Esc 关闭
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -332,6 +361,7 @@ export default function SettingsPanel({ onClose }: Props) {
   };
 
   const SLOT_EDIT: Record<string, { model: boolean; base: boolean }> = {
+    'direct-api': { model: true, base: true },
     openai: { model: true, base: true },
     relay: { model: true, base: true },
     // anthropic 也要能改 Base URL：官方直连之外，中转站/自建网关/兼容代理都靠它
@@ -345,6 +375,7 @@ export default function SettingsPanel({ onClose }: Props) {
     setChatRows((rs) => [...rs, {
       slot: 'custom', order: 0, name: '', sub: '自定义', type: 'openai',
       model: '', baseUrl: '', keyMasked: '', role: '备', result: '待保存',
+      thinking: false, thinkingFormat: 'openai',
     }]);
   };
 
@@ -440,31 +471,50 @@ export default function SettingsPanel({ onClose }: Props) {
                 <span className="pname">{r.name}<small>{r.sub}</small></span>
               )}
               {isCustom && ed && ed.base ? (
-                <select
-                  className="mock proto-sel"
-                  value={r.protocol || 'openai'}
+                <span
+                  className="proto-trigger"
+                  role="button"
+                  tabIndex={0}
+                  aria-haspopup="listbox"
+                  aria-expanded={!!protoDd[i]}
+                  ref={(el) => { protoRefs.current[i] = el; }}
                   title="上游协议：中转站是 OpenAI 兼容格式选 openai；原生 Anthropic 格式（/v1/messages）选 anthropic"
-                  onChange={(e) => {
-                    ops?.onRow?.(i, { protocol: e.target.value });
-                    // 协议变了，旧协议拉来的模型列表不再适用：清内存列表 + 下拉
-                    setModelLists((m) => {
-                      const next = { ...m };
-                      delete next[i];
-                      return next;
-                    });
-                    setOpenDd((s) => ({ ...s, [i]: false }));
+                  onClick={() => setProtoDd((s) => ({ ...s, [i]: !s[i] }))}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setProtoDd((state) => ({ ...state, [i]: !state[i] }));
+                    }
                   }}
                 >
-                  <option value="openai">openai</option>
-                  <option value="anthropic">anthropic</option>
-                </select>
+                  <span className="proto-label">{r.protocol === 'anthropic' ? 'anthropic' : 'openai'}</span>
+                  {protoDd[i] && (
+                    <OptionsDropdown
+                      anchor={protoRefs.current[i]}
+                      items={[{ value: 'openai', label: 'openai（OpenAI 兼容）' }, { value: 'anthropic', label: 'anthropic（原生 /v1/messages）' }]}
+                      current={r.protocol || 'openai'}
+                      onPick={(v) => {
+                        ops?.onRow?.(i, { protocol: v });
+                        // 协议变了，旧协议拉来的模型列表不再适用：清内存列表 + 收起
+                        setModelLists((m) => {
+                          const next = { ...m };
+                          delete next[i];
+                          return next;
+                        });
+                        setProtoDd((s) => ({ ...s, [i]: false }));
+                        setOpenDd((state) => ({ ...state, [i]: false }));
+                      }}
+                      onClose={() => setProtoDd((s) => ({ ...s, [i]: false }))}
+                    />
+                  )}
+                </span>
               ) : isCustom ? (
                 <span title="保存后可切换协议">{r.protocol === 'anthropic' ? 'anthropic' : 'openai'}</span>
               ) : (
                 <span>{r.type}</span>
               )}
               {ed && ed.model && (!ops?.media || r.adv) ? (
-                <span className="model-cell" ref={(el) => { modelCellRefs.current[i] = el; }}>
+                <span className={`model-cell${isCustom ? ' custom-model-cell' : ''}`} ref={(el) => { modelCellRefs.current[i] = el; }}>
                   <input
                     className="mock"
                     value={r.model}
@@ -509,6 +559,34 @@ export default function SettingsPanel({ onClose }: Props) {
                   {modelLists[i]?.err && (
                     <span className="fetch-err" title={modelLists[i].err}>⚠</span>
                   )}
+                  {isCustom ? (
+                    <span className="thinking-controls">
+                      <label title="仅在上游模型支持推理时开启；格式须与供应商接口一致">
+                        <input
+                          type="checkbox"
+                          checked={r.thinking === true}
+                          onChange={(e) => ops?.onRow?.(i, { thinking: e.target.checked })}
+                        />
+                        该模型会思考
+                      </label>
+                      {r.thinking && r.protocol !== 'anthropic' ? (
+                        <select
+                          aria-label={`${r.name || '自定义供应商'}思考格式`}
+                          value={r.thinkingFormat || ''}
+                          onChange={(e) => ops?.onRow?.(i, { thinkingFormat: e.target.value })}
+                        >
+                          <option value="">保留现有 / 自动</option>
+                          <option value="openai">OpenAI</option>
+                          <option value="deepseek">DeepSeek</option>
+                          <option value="openrouter">OpenRouter</option>
+                          <option value="together">Together</option>
+                          <option value="qwen">Qwen</option>
+                          <option value="qwen-chat-template">Qwen chat template</option>
+                          <option value="zai">ZAI</option>
+                        </select>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </span>
               ) : (
                 <span className={`cell-text${ops?.media && !r.model ? ' dim' : ''}`} title={r.model || '内建默认'}>
@@ -618,6 +696,19 @@ export default function SettingsPanel({ onClose }: Props) {
           </div>
         </div>
 
+        {banner && (
+          <div
+            role="status"
+            style={{
+              margin: '0 16px 12px', padding: '10px 12px', borderRadius: 8,
+              background: 'var(--warn-bg, #fff7ed)', color: 'var(--warn-fg, #9a3412)',
+              border: '1px solid var(--warn-border, #fed7aa)', fontSize: 13, lineHeight: 1.5,
+            }}
+          >
+            {banner}
+          </div>
+        )}
+
         <div className="settings-body">
           <nav className="settings-nav">
             <button className={`snav${sec === 'model' ? ' active' : ''}`} onClick={() => setSec('model')}>
@@ -646,16 +737,21 @@ export default function SettingsPanel({ onClose }: Props) {
                 {chan === 'chat' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '主通道已配置' : '未配置'}</span>
-                      <span className="desc">经本地网关路由（主备自动降级）</span>
+                      <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? (transport === 'api' ? 'API 已配置' : '主通道已配置') : '未配置'}</span>
+                      <label className="desc">连接方式： <select value={transport} disabled={saving || modelLoading}
+                        onChange={(e) => void changeTransport(e.target.value as 'api' | 'openclaw')}>
+                        <option value="api">API 直连（无需 OpenClaw）</option>
+                        <option value="openclaw">OpenClaw Agent</option>
+                      </select></label>
                       {selftest && <span className="desc">上次自测 {hhmm(selftest.testedAt)}</span>}
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing}>自测本通道</button>
                     </div>
-                    <ThinkingSelect defaults />
+                    {transport !== 'api' && <ThinkingSelect defaults />}
                     {renderBoard(chatRows, { onRow: updateChatRow, onPrimary: setPrimaryRow, onRemove: removeRow })}
-                    <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>
-                    {(() => {
+                    {transport === 'api' ? <div className="foot-note">此通道使用独立的 EASEL_DIRECT_API_* 配置，与原有 OpenAI 通道分开保存。支持聊天、画像、文本和图片附件（需模型支持图片）。没有本机文件、浏览器或技能执行工具。</div>
+                      : <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>}
+                    {transport !== 'api' && (() => {
                       // 本机 agent 区块：装了 Claude Code / Gemini CLI 并登录过的用户不需要填 API Key。
                       // 只展示「已装」的行 —— 没装的用户看一眼全是灰的只会困惑。
                       const shown = localAgents.filter((a) => a.installed);
@@ -824,7 +920,7 @@ export default function SettingsPanel({ onClose }: Props) {
         </div>
 
         <div className="settings-foot">
-          ⓘ 环境安装在后台执行，装完自动回写状态；模型配置保存在服务端，按各通道的保存按钮生效。
+          ⓘ 模型配置保存写入 .env；API 直连无需同步 OpenClaw，下一轮生效。切换连接方式后请新建对话。
         </div>
       </div>
     </div>
@@ -843,6 +939,31 @@ function FixedDropdown({ anchor, models, current, emptyHint, onPull, pulling, on
   onPick: (mid: string) => void;
   onClose: () => void;
 }) {
+  return (
+    <OptionsDropdown
+      anchor={anchor}
+      items={models.map((m) => ({ value: m, label: m }))}
+      current={current}
+      emptyHint={emptyHint}
+      onPull={onPull}
+      pulling={pulling}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  );
+}
+
+/** 通用选项浮层（协议下拉与模型下拉共用同一视觉：圆角/阴影/悬停/当前项标注）。 */
+function OptionsDropdown({ anchor, items, current, emptyHint, onPull, pulling, onPick, onClose }: {
+  anchor: HTMLElement | null;
+  items: { value: string; label: string }[];
+  current: string;
+  emptyHint?: string;
+  onPull?: () => void;
+  pulling?: boolean;
+  onPick: (value: string) => void;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   useEffect(() => {
@@ -852,7 +973,7 @@ function FixedDropdown({ anchor, models, current, emptyHint, onPull, pulling, on
       const width = Math.max(r.width, 240);
       // 优先向下展开；下方空间不足时向上翻
       const below = window.innerHeight - r.bottom;
-      const est = Math.min(models.length, 8) * 30 + 10;
+      const est = Math.min(items.length, 8) * 30 + 10;
       const openUp = below < Math.min(est, 240) && r.top > est;
       setPos({
         top: openUp ? r.top - Math.min(est, 240) - 4 : r.bottom + 4,
@@ -867,26 +988,35 @@ function FixedDropdown({ anchor, models, current, emptyHint, onPull, pulling, on
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [anchor, models.length]);
+  }, [anchor, items.length]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)
           && !(anchor && anchor.contains(e.target as Node))) onClose();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        anchor?.focus();
+      }
+    };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [anchor, onClose]);
 
   if (!pos) return null;
   return createPortal(
-    <div ref={ref} className="model-dd" role="listbox" style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}>
-      {models.length === 0 && (
+    <div ref={ref} className="model-dd" role="listbox" onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}>
+      {items.length === 0 && (
         <div className="dd-empty">
           <span>{emptyHint || '该端点没有返回模型'}</span>
           {onPull && (
@@ -896,14 +1026,23 @@ function FixedDropdown({ anchor, models, current, emptyHint, onPull, pulling, on
           )}
         </div>
       )}
-      {models.map((mid) => (
+      {items.map((it) => (
         <div
-          key={mid}
-          className={`dd-item${mid === current ? ' active' : ''}`}
-          onMouseDown={(e) => { e.preventDefault(); onPick(mid); }}
+          key={it.value}
+          role="option"
+          aria-selected={it.value === current}
+          tabIndex={0}
+          className={`dd-item${it.value === current ? ' active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); onPick(it.value); }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onPick(it.value);
+            }
+          }}
         >
-          <span>{mid}</span>
-          {mid === current && <small>当前</small>}
+          <span>{it.label}</span>
+          {it.value === current && <small>当前</small>}
         </div>
       ))}
     </div>,

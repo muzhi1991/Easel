@@ -220,16 +220,19 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、Node.js 24.16+（24.x）、26.1+（26.x）或 27+、Git 和 FFmpeg；25.x 与 26.0 不兼容。如果系统没有 `winget`，再使用官方安装器安装并加入 PATH。随后安装器会创建项目内 `.venv`，安装 Python/Node 依赖、前端生产包和 Playwright Chromium，并使用独立的 `easel` OpenClaw profile。安装完成后可运行 `.venv\Scripts\easel.exe doctor` 检查环境。
 
+安装器支持 Windows 自带的 PowerShell 5.1，安装后可直接运行 `.venv\Scripts\easel.exe web` 启动工作台。原生安装与 Web/CLI 入口已经提供；各技能及浏览器发布的 Windows 全链路兼容仍在持续完善。
+
 `bash setup.sh` 是可重复运行的引导式安装器，直接执行即可，不需要先手动安装 Easel 依赖。安装过程中会：
 
-1. 检查 Python、Python `venv`、Node.js 和 Git；FFmpeg 缺失时会尝试通过系统包管理器安装，仍无法安装则停止并提示处理方式。
+1. 检查 Python、Python `venv`、Node.js 和 Git；FFmpeg 缺失时会尝试通过系统包管理器安装，装不上只会降级提示（视频/音频类技能不可用），不再中断安装。
 2. 询问是否创建或复用项目虚拟环境 `.venv/`；默认选择 `Y`。如果系统缺少 `venv`，会提示安装对应系统包（例如 Debian/Ubuntu 的 `python3-venv`）。
 3. 检查或安装 OpenClaw，并创建独立的 `easel` profile，不覆盖用户已有的 `~/.openclaw/`。
-4. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装 Chromium；这些步骤任一失败都会停止，不会回退成不完整安装。
-5. 在终端中引导配置 Agent 模型：可选择 Anthropic、OpenAI/OpenAI-compatible、其他 Anthropic-compatible 服务，API Key 输入不会回显。
-6. 同步 skills、校验 OpenClaw 配置并启动 gateway。
+4. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装 Chromium。Python 依赖与前端构建失败会停止；Chromium 下载失败只降级提示（浏览器登录/发布不可用）。
+5. 同步 skills、校验 OpenClaw 配置并启动 gateway。
 
-如果已经提前配置了有效的 `.env`，安装器会复用配置，不会重复询问；如果使用重定向或 CI 等非交互模式，安装器会跳过提问并明确提示缺少的配置。
+**模型 API Key 在浏览器里配，安装器不再在终端询问。** 装完运行 `easel web`，首次打开会直接停在「设置 → 模型配置」，填入 Key 保存即可 —— Easel 会自动写好 OpenClaw 配置并重启 gateway，不需要再跑一遍 `setup.sh`。相比终端向导，这里还能拉取可用模型列表、做连通性自测。也可以直接编辑 `.env` 填好 Key，再运行 `easel doctor` 复检。
+
+安装器全程非交互（只有「是否创建 `.venv`」一问，非交互环境下按默认值），适合 CI 与自动化。非致命问题（FFmpeg、Chromium、gateway 启动、模型未配置等）会收集起来在结尾汇总，并写入 `outputs/_install/last-install.json` 供 `easel doctor` 复述，安装本身仍以 0 退出。若希望这些问题直接让安装失败，设 `EASEL_SETUP_STRICT=1`。
 
 安装完成后，`easel` 命令安装在项目的 `.venv` 中。先激活虚拟环境再运行（每次新开终端都要先激活）：
 
@@ -245,6 +248,10 @@ easel web                    # 启动 Web 工作台
 
 启动 Web 工作台后访问 `http://localhost:7860`。安装完成后可以运行 `easel doctor` 检查环境，
 运行 `easel ping` 检查 gateway 和 Agent 连通性。
+
+如果 Easel 运行在 VSCode Remote SSH 连接的服务器上，需要在 VSCode 的“端口”面板
+转发服务器端口 `7860`，再打开面板显示的本地转发地址（本地端口可能不同）。
+服务器的 `localhost` 不是你电脑的 `localhost`；不要为了访问而把无认证的工作台暴露到公网。
 
 安装器会统一安装 Web、媒体处理和浏览器发布所需的 Python 依赖：
 
@@ -299,6 +306,19 @@ CLAUDE_MODEL=你的模型名
 
 安装器会把这些标准配置同步到 OpenClaw。OpenClaw 支持但 Easel 没有预设环境变量映射的其他 provider，
 可以按 OpenClaw 自身的 provider/auth 配置方式配置；Easel 不会覆盖这些自定义配置。
+
+在 Web 设置的聊天通道中，自定义供应商可勾选“该模型会思考”，保存后会写入模型的
+`reasoning: true`。OpenAI 兼容协议还可选择思考格式（OpenAI、DeepSeek 等），需与上游
+接口实际支持的格式一致；原生 Anthropic 协议使用其自身的思考格式，无需另选。
+新增行默认关闭，避免对非推理模型发送不支持的参数；已有声明会回显。取消勾选会写入
+`reasoning: false`，仅移除该模型的思考相关兼容项，不影响工具等其它能力声明。
+保存 API 不传 `thinking` 时保持原有声明；启用时保留已有努力档位映射，不推测上游支持的档位。
+思考格式会写入 OpenClaw 的 `compat.thinkingFormat`，实际发送哪些参数由其版本和模型适配器决定；
+例如 OpenClaw 2026.9.8 对普通自定义模型仍可能只发送 `reasoning_effort`，不是任意方言转换器。
+这只是能力声明，不保证网关支持推理，亦不覆盖 `EASEL_THINKING_LEVEL=off`；
+API 直连模式不提供此 OpenClaw 专用开关。
+对显式声明 `reasoning: false` 的当前模型，Web 调用 OpenClaw CLI 时会使用 `--thinking off`，
+避免禁用后仍请求不支持的 `medium` 档位。
 
 `.env.example` 还列出了视频、音乐、语音等可选模型配置。只需要配置实际使用的能力，也可以在 Web
 工作台的“技能库”中填写；没有配置的媒体 Skill 不会影响聊天、策划和文本创作。常见可选项包括：

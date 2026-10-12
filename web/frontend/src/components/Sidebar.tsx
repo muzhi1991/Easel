@@ -21,13 +21,13 @@ interface SidebarProps {
   onNewProfile: () => void;
   sessions: ChatSession[];
   activeSessionId: string | null;
-  activeSessionHasMessages: boolean;
   onSessionSelect: (id: string) => void;
   onSessionDelete: (id: string) => void;
   onSessionRename: (id: string, title: string) => void;
   onSessionArchive: (id: string, archived: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
+  apiDirect: boolean;
   onOpenSettings: () => void;
 }
 
@@ -50,13 +50,13 @@ export default function Sidebar({
   onNewProfile,
   sessions,
   activeSessionId,
-  activeSessionHasMessages,
   onSessionSelect,
   onSessionDelete,
   onSessionRename,
   onSessionArchive,
   onNewChat,
   gatewayStatus,
+  apiDirect,
   onOpenSettings,
 }: SidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -127,8 +127,7 @@ export default function Sidebar({
             if (e.target.value === '__new__') { onNewProfile(); return; }
             onPersonaChange(e.target.value);
           }}
-          disabled={activeSessionHasMessages}
-          title={activeSessionHasMessages ? '当前对话已绑定画像，切换画像将新建对话' : '选择用户画像'}
+          title="选择用户画像（一个对话对应一个画像：切换会新建一个对话）"
         >
           <option value="">通用模式</option>
           {personas.map((p) => (
@@ -174,9 +173,9 @@ export default function Sidebar({
       <div className="sidebar-status">
         <span className={`status-dot ${gatewayStatus === 'connected' ? '' : 'offline'}`} />
         {gatewayStatus === 'connected'
-          ? '网关已连接'
+          ? (apiDirect ? 'API 直连已配置' : '网关已连接')
           : gatewayStatus === 'disconnected'
-            ? '网关离线'
+            ? (apiDirect ? 'API 配置不完整' : '网关离线')
             : '连接中…'}
         <button className="settings-gear" onClick={onOpenSettings} title="设置（模型 · 环境 · 更多）">
           <IconGear size={13} /> 设置
