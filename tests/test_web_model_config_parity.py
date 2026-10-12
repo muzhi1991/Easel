@@ -108,7 +108,7 @@ def test_real_key_reports_configured(tmp_path, monkeypatch):
 
 # ── /api/settings/bootstrap：首开自检 ────────────────────────────────
 
-def test_bootstrap_reports_unconfigured_for_placeholder(tmp_path, monkeypatch):
+def test_bootstrap_reports_unconfigured_for_placeholder(tmp_path, monkeypatch, oc_cfg):
     """占位符 key + 无路由时必须报 modelConfigured=false。
 
     安装不再在终端问 key，前端靠这个判据决定是否把用户直接带到模型设置页；
@@ -133,7 +133,7 @@ def test_bootstrap_reports_unconfigured_for_placeholder(tmp_path, monkeypatch):
     assert d["routeOk"] is False
 
 
-def test_bootstrap_requires_both_env_and_route(monkeypatch):
+def test_bootstrap_requires_both_env_and_route(monkeypatch, oc_cfg):
     """.env 有 key 但 provider 没写进 openclaw 时也必须算未配置。
 
     这正是 doctor 里那条「全绿却对话报错」防线：只查 .env 查不出 provider 一个字
@@ -150,6 +150,36 @@ def test_bootstrap_requires_both_env_and_route(monkeypatch):
         d = c.get("/api/settings/bootstrap").json()
     assert d["modelConfigured"] is False, "只有 .env 有 key 不等于配好了"
     assert d["envKeyOk"] is True and d["routeOk"] is False
+
+
+@pytest.mark.parametrize("primary,enabled,expected", [
+    ("openai/gpt-test", True, True),
+    ("openai/gpt-test", False, False),
+    ("easel-openai/other", True, False),
+])
+def test_bootstrap_native_codex_uses_active_runtime(monkeypatch, oc_cfg, primary, enabled, expected):
+    """仅启用且作为主模型的 Codex 可复用本机登录，不能误认其他未配置路由。"""
+    from fastapi.testclient import TestClient
+
+    oc_cfg.write_text(json.dumps({
+        "agents": {"defaults": {
+            "model": {"primary": primary},
+            "models": {"openai/gpt-test": {"agentRuntime": {"id": "codex"}}},
+        }},
+        "plugins": {"entries": {"codex": {"enabled": enabled}}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(app, "_direct_api_enabled", lambda: False)
+    monkeypatch.setattr(app, "check_gateway", lambda: True)
+    monkeypatch.setattr("easel.commands.doctor._env_key_valid", lambda: False)
+    monkeypatch.setattr("easel.commands.doctor._primary_model_routable",
+                        lambda: (False, "provider 未配置认证"))
+    local = "http://127.0.0.1:7860"
+    with TestClient(app.app, base_url=local, client=("127.0.0.1", 51234),
+                    headers={"Origin": local}) as c:
+        d = c.get("/api/settings/bootstrap").json()
+    assert d["modelConfigured"] is expected
+    assert d["routeOk"] is expected
+    assert d["envKeyOk"] is False
 
 
 def test_gateway_restart_takes_no_parameters() -> None:
