@@ -3170,7 +3170,6 @@ async def api_chat_stream(req: ChatRequest):
             headers = {"x-openclaw-session-key": f"agent:main:{sk}",
                        "x-openclaw-session-id": _openclaw_session_id(sk)}
             tool_noted = False
-            saw_done = False
             got_text = False
             try:
                 await asyncio.to_thread(_apply_http_thinking, f"agent:main:{sk}", thinking)
@@ -3181,6 +3180,7 @@ async def api_chat_stream(req: ChatRequest):
                             "POST", chat_completions_url(),
                             json=body, headers=headers) as resp:
                         if resp.status_code != 200:
+                            run_info["http_error"] = True
                             raw = (await resp.aread())[:200].decode("utf-8", "replace")
                             to_client("error", f"❌ 对话失败（HTTP {resp.status_code}）：{raw[:160]}")
                             return
@@ -3189,16 +3189,20 @@ async def api_chat_stream(req: ChatRequest):
                                 continue
                             payload = line[5:].lstrip()   # SSE 允许 `data:{…}`（冒号后无空格）
                             if payload == "[DONE]":
-                                saw_done = True
+                                run_info["http_done"] = True
                                 break
                             try:
                                 d = json.loads(payload)
                             except ValueError:
                                 continue
                             if isinstance(d.get("error"), dict):   # 200 里夹错误对象：不能当正常流吞掉
+                                run_info["http_error"] = True
                                 to_client("error", f"❌ 网关返回错误：{str(d['error'])[:160]}")
                                 return
-                            delta = (d.get("choices") or [{}])[0].get("delta") or {}
+                            choice = (d.get("choices") or [{}])[0]
+                            if choice.get("finish_reason") is not None:
+                                run_info["stop_reason"] = choice["finish_reason"]
+                            delta = choice.get("delta") or {}
                             # 思考流的两个可能来源，先到先得（`sse_thinking` 闩锁，防两路都来时重复）：
                             # ① 这里的 reasoning 增量 —— openclaw 2026.6.11 的 chat/completions
                             #    实现里 reasoning/thinking 出现 0 次，**不会**给；留着是给别的网关/
@@ -3218,13 +3222,15 @@ async def api_chat_stream(req: ChatRequest):
                                 to_client("activity", "🔧 正在执行操作…")
                 # 流正常结束却既没正文也没 [DONE]：多半是端点没真开或中途断了。
                 # 不报错的话这一轮会静默落一条空回答，还会被 /api/chat/last 原样取回。
-                if not got_text and not saw_done:
+                if not got_text and not run_info["http_done"]:
                     to_client("error", "❌ 网关流异常结束：没有收到任何内容（检查 "
                                        "gateway.http.endpoints.chatCompletions 是否开启，"
                                        "或设 EASEL_CHAT_TRANSPORT=cli 回退）")
             except asyncio.CancelledError:
+                run_info["http_error"] = True
                 raise
             except Exception as e:  # noqa: BLE001
+                run_info["http_error"] = True
                 to_client("error", f"❌ 网关连接失败：{str(e)[:140]}")
             finally:
                 # 先把 SENTINEL 排进 q（FIFO 保证它排在本轮所有 token 之后），再标记完成：
@@ -3307,7 +3313,7 @@ async def api_chat_stream(req: ChatRequest):
         SENTINEL = object()
         stdout_lines = []
         run_info: dict = {"stop_reason": None, "last_ev": None, "saw_message_end": False,
-                          "run_id": None,
+                          "run_id": None, "http_done": False, "http_error": False,
                           "fetch_count": 0, "token_chars": 0, "thinking_chars": 0,
                           "delegated": False, "ignored_foreign_events": 0}
 
@@ -3422,8 +3428,7 @@ async def api_chat_stream(req: ChatRequest):
                     return          # 还没拿到 runId，等下一条带 runId 的事件再闩锁
                 run_info["run_id"] = rid
             ev, et, delta = o.get("event"), o.get("evtType"), o.get("delta") or ""
-            # 记录最后一个 raw 事件：正常收尾 last_ev == assistant_message_end；
-            # 若停在 text_delta/thinking_delta 说明输出或思考流被中断、没正常收尾（本次排查关键信号）。
+            # raw 日志可能乱序落盘；保留末事件用于诊断，HTTP 收尾只认自己的响应流。
             if ev:
                 run_info["last_ev"] = ev
             if ev == "assistant_message_end":
@@ -3496,6 +3501,7 @@ async def api_chat_stream(req: ChatRequest):
         # 两条路径都靠「队列里读到 SENTINEL」收尾。HTTP 模式若改用带外标志（一开始就置 True），
         # 最后一批还排在 q 里没被消费的 token 会随 poll() 转为已完成而被直接丢掉——答案尾巴被截。
         tail_finished = False
+        clean_end = False
         try:
             while True:
                 # A raw-stream reader failure must not be mistaken for model
@@ -3534,6 +3540,12 @@ async def api_chat_stream(req: ChatRequest):
                 except Exception:
                     pass
             sr = run_info.get("stop_reason")
+            # HTTP 的 [DONE] 属于本次请求，旁路 raw 日志既可能乱序，也可能是先前工具步骤。
+            # 某些网关仅发 [DONE]，没有 finish_reason；显式异常原因仍优先于 [DONE]。
+            clean_end = (
+                run_info["http_done"] and not run_info["http_error"] and sr in (None, "stop")
+                if is_http else run_info["last_ev"] == "assistant_message_end"
+            ) and rc == 0 and not timed_out and sk not in _STOPPED_CHAT
             if not emitted:
                 clean = clean_agent_output("".join(stdout_lines))
                 if clean:
@@ -3546,7 +3558,7 @@ async def api_chat_stream(req: ChatRequest):
             # 收尾检测：即使已吐了内容，只要不是「正常收尾」就显式告知——
             # 否则被截断（触顶）/被杀（负载）/流被中断，都会被当成「清晰地答完了」，
             # 用户看到的就是「答一半突然停、也不说做完」（本 bug 根因）。
-            # 正常收尾的唯一标志：raw 流最后一个事件是 assistant_message_end。
+            # HTTP 正常收尾以本请求的完成标记和结束原因为准，不依赖 raw 文件行顺序。
             # 用户显式「停止」不是异常中断 → 不报「被中断」告警（前端已就地标注「已停止」）。
             if (emitted or run_info["thinking_chars"]) and sk not in _STOPPED_CHAT:
                 note = None
@@ -3556,10 +3568,12 @@ async def api_chat_stream(req: ChatRequest):
                 elif rc not in (0, None):
                     note = (f"\n\n---\n⚠️ 生成**被中断**（退出码 {rc}，多半是超时或系统负载过高把进程杀了），"
                             f"不是正常收尾。可以让我重试。")
-                elif sr == "tool_use":
+                elif sr in ("tool_use", "tool_calls", "function_call"):
                     note = ("\n\n---\n⚠️ 我刚做完这一步、**正要执行下一步操作时中断了**"
                             "（本轮以工具调用结尾却没能继续，前端把它当成答完了）。回我「继续」我接着做。")
-                elif run_info.get("last_ev") not in (None, "assistant_message_end"):
+                elif (is_http and not clean_end) or (
+                    not is_http and run_info.get("last_ev") not in (None, "assistant_message_end")
+                ):
                     note = ("\n\n---\n⚠️ 这条**可能没写完**——模型的输出/思考流被中断、没有正常收尾"
                             "（多为网络或模型代理把长回复的流掐断了）。回我「继续」，或重试。")
                 elif run_info.get("text_tail", "").rstrip()[-1:] in ("：", ":"):
@@ -3606,7 +3620,9 @@ async def api_chat_stream(req: ChatRequest):
                         "rc": proc.poll(),
                         "stop_reason": run_info["stop_reason"],
                         "last_ev": run_info["last_ev"],
-                        "clean_end": run_info["last_ev"] == "assistant_message_end",
+                        "clean_end": clean_end,
+                        "http_done": run_info["http_done"],
+                        "http_error": run_info["http_error"],
                         "saw_message_end": run_info["saw_message_end"],
                         "fetch_count": run_info["fetch_count"],
                         "token_chars": run_info["token_chars"],
@@ -3621,7 +3637,7 @@ async def api_chat_stream(req: ChatRequest):
             # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
             _save_turn(pk, "done", "".join(full_text), {
                 "turn_id": turn_id,
-                "clean_end": run_info.get("last_ev") == "assistant_message_end",
+                "clean_end": clean_end,
                 "stop_reason": "user_stopped" if user_stopped else run_info.get("stop_reason"),
             })
             xlock.release()
