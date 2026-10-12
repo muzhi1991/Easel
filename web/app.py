@@ -1128,16 +1128,18 @@ async def api_settings_bootstrap():
     """首次打开时的自检：模型配好了吗、网关活着吗、上次安装留了什么没做完。
 
     安装脚本不再在终端问 API Key（改为引导到这里配），所以前端需要一个可靠的
-    「还缺什么」判据。modelConfigured 必须同时满足两件事，这正是 doctor 里那条
+    「还缺什么」判据。API provider 必须同时满足两件事，这正是 doctor 里那条
     「全绿却对话报错」防线：
       - .env 里有可用的认证（_env_key_valid，带占位符识别）；
       - primary 指向的 provider 在 openclaw.json 里真的配了认证
         （_primary_model_routable）—— 只查 .env 查不出 provider 一个字没写的情况。
+    原生 Codex 主路由复用本机登录，以已启用的 runtime 配置为准，不要求 .env API Key。
     """
     direct = _direct_api_enabled()
     env_ok = False
     route_ok = False
     route_detail = ''
+    native_configured = False
     try:
         if direct:
             api_config(read_settings(ENV_FILE))
@@ -1146,6 +1148,12 @@ async def api_settings_bootstrap():
             from easel.commands.doctor import _env_key_valid, _primary_model_routable
             env_ok = bool(_env_key_valid())
             route_ok, route_detail = _primary_model_routable()
+            if _oc_config_path().is_file():
+                from easel.codex_backend import status as codex_status
+                cfg = json.loads(_oc_config_path().read_text(encoding="utf-8"))
+                native_configured = bool(codex_status(cfg)["active"])
+                if native_configured:
+                    route_ok, route_detail = True, "Codex 已接入（复用本机登录）"
     except DirectAPIError as error:
         route_detail = str(error)
     except Exception as e:  # noqa: BLE001
@@ -1160,7 +1168,7 @@ async def api_settings_bootstrap():
         warnings = []
 
     return {
-        'modelConfigured': bool(env_ok and route_ok),
+        'modelConfigured': bool(native_configured or (env_ok and route_ok)),
         'envKeyOk': env_ok,
         'routeOk': bool(route_ok),
         'routeDetail': route_detail,
