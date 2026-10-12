@@ -127,7 +127,8 @@ export default function Sidebar({
             if (e.target.value === '__new__') { onNewProfile(); return; }
             onPersonaChange(e.target.value);
           }}
-          title="选择用户画像（一个对话对应一个画像：切换会新建一个对话）"
+          aria-label="用户画像"
+          title={currentPage === 'chat' ? '选择画像；已有消息时切换会新建对话' : '选择当前任务使用的画像，不影响历史对话'}
         >
           <option value="">通用模式</option>
           {personas.map((p) => (
