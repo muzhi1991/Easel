@@ -47,6 +47,12 @@ def generate_video(prompt: str, output: Path, *, provider: str | None = None, **
     return rt.submit("video", "generate_video", VideoRequest(prompt, Path(output), **options), provider)
 
 
+def generate_image(prompt: str, output: Path, *, provider: str | None = None, **options) -> dict:
+    rt = runtime()
+    from easel_media_adapters import ImageRequest
+    return rt.submit("image", "generate_image", ImageRequest(prompt, Path(output), **options), provider)
+
+
 def generate_speech(text: str, output: Path, *, provider: str | None = None,
                     voice: str | None = None, language: str | None = None,
                     instructions: str | None = None) -> dict:

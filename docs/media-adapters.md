@@ -513,3 +513,16 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 扩展已合并并推送 dev，运行适配包0.6.0，仅重启 Web并同步本次 ai-music 技能；原实例地址、Key、默认配置和两个 Gateway均未改动。localhost/LAN200，原音乐列表新说明与探活通过，截图 `/tmp/easel-yue2-extensions-settings.png`。
 
 新 Agent session `85c463aa-0fb9-47f2-835f-134122584a67` status=ok，约114.9秒完成真实参考录音纯钢琴器乐改编。作业 `dfa84d195ff74e2ebee42c61f90453d0` operation=cover，instrumental=true、duration_seconds=30、duration_mode=target，没有歌词或cot/ABC；原参考录音42.598667秒，记录SHA256。结果40.078667秒、偏差+10.078667秒，无截断，服务 vocal_notes=0。Agent 使用恢复查询完成任务，并明确报告未听审，不把目标当作严格长度。产物 `outputs/YuE2扩展对话验收/piano.mp3` 及其FLAC/ABC/元数据；结果 `/tmp/easel-yue2-extensions-agent.json`，均为本机 ignored 验收材料。
+
+
+## 多实例生图（0.7.0）
+
+新增 `openai-image` 适配器和 `ImageRequest`，同一个 ai-image-gen Skill 通过 `--provider` 调用多个实例；省略时使用 `defaults.image`，没有媒体默认时仍使用原 IMG_* 配置。显式 `--provider legacy` 使用旧配置。设置页生图表复用已有媒体实例 UI，可编辑、探活、选择默认；选择旧行会清除 image 媒体默认。
+
+执行入口为 `ai_image.py` → `easel.media.generate_image` → 图片适配器。同步文生图 `/images/generations`，声明 supports_edit 的实例可用 multipart `/images/edits`，不自动尝试 variations 或其他协议。支持 URL/base64，下载不转发生图凭证，校验图片并编码为指定格式后原子落盘；返回数量不符不自动补单。每实例默认请求超时1800秒，CLI可覆盖。
+
+本部署策略在 ai-image-gen Skill：默认 Flare；明确额度不足可选择自部署 Qwen；用户要求对比可同时生成并标注模型；质量不满意或主动重跑优先 Sunburst。策略由 Agent 根据用户意图执行，不在底层无条件重试。仅明确 quota 错误码输出 IMAGE_QUOTA_EXHAUSTED；普通429、网络故障、超时不按额度不足处理。Qwen 文生图限制保持不变。
+
+实例及默认保存在原媒体配置文件，凭证仅通过 EASEL_MEDIA_* 环境变量引用，不写入 Git。旧 IMG_* 保留以便显式调用。部署需安装适配包、构建前端、重启 Web，并仅同步 ai-image-gen 技能和 ai_image.py 共享脚本；不执行全量 workspace 同步。
+
+2026-10-14 验收：Flare、Sunburst、自部署 Qwen 均经新入口实际生成并保存1024×1024图片。当前执行进程对内网 Python HTTP 连接报 Errno 65，原生 curl 正常；Qwen 实例显式使用 curl，生成和图片下载都遵循该设置，未改其他媒体实例。GPT 实例保持 httpx。本次只验证文生图，实例暂不启用图片编辑能力。额度切换靠明确错误码和 Skill 策略；没有通过耗尽真实额度来测试。

@@ -1715,7 +1715,7 @@ def _model_channels(runtime: str | None = None) -> dict:
                     "slot": _p["id"], "order": 0, "name": _p["name"], "sub": _gid,
                     "type": _p["id"], "model": (env.get(_mk["env"]) or "").strip() if _mk else "",
                     "baseUrl": (env.get(_bk["env"]) or "").strip() if _bk else "",
-                    "keyMasked": _masked, "role": "主" if (_gid == "image" or _chosen == _p["id"]) else "备",
+                    "keyMasked": _masked, "role": "主" if ((_gid == "image" and not adapter_defaults.get("image")) or _chosen == _p["id"]) else "备",
                     "result": "已配置" if _ok else "未配置",
                     "key2Label": _k2["label"] if _k2 else "",
                     "key2Masked": _mask_key(env.get(_k2["env"], "")) if _k2 and _k2["secret"] else "",
@@ -2243,7 +2243,7 @@ async def api_settings_models_save(req: ModelSaveRequest):
         if not _mupd:
             raise HTTPException(400, "没有可保存的改动（key 留空表示不改）")
         _write_env_direct(_mupd)
-        if _gid0 in ("video", "voice", "music") and _primary0:
+        if _gid0 in ("image", "video", "voice", "music") and _primary0:
             try:
                 rt = _media_runtime()
             except RuntimeError:

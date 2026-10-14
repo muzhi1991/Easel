@@ -538,6 +538,8 @@ def _save_async_images(task_data: dict[str, Any], output: str, fmt: str) -> list
 # ── 子命令：text2img ──────────────────────────────────────
 
 def cmd_text2img(args: argparse.Namespace) -> None:
+    if args.timeout is None:
+        args.timeout = 180
     prompt = (args.prompt or "").strip()
     if not prompt:
         fail("prompt 不能为空。")
@@ -570,6 +572,8 @@ def cmd_text2img(args: argparse.Namespace) -> None:
 # ── 子命令：img2img ───────────────────────────────────────
 
 def cmd_img2img(args: argparse.Namespace) -> None:
+    if args.timeout is None:
+        args.timeout = 180
     prompt = (args.prompt or "").strip()
     if not prompt:
         fail("prompt 不能为空。")
@@ -671,6 +675,8 @@ def _encode_multipart(fields: dict[str, str],
 # ── 子命令：variations ────────────────────────────────────
 
 def cmd_variations(args: argparse.Namespace) -> None:
+    if args.timeout is None:
+        args.timeout = 180
     base_url, model, api_key, _ = load_and_require()
     mode = detect_mode(base_url, args.mode)
     print(f"[variations] 模式={mode} base_url={base_url} model={model} image={args.image}",
@@ -783,6 +789,7 @@ def _print_results(paths: list[Path]) -> None:
 # ── CLI ───────────────────────────────────────────────────
 
 def _add_common_output(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--provider", help="媒体实例 ID；legacy 显式使用旧 IMG_* 配置。")
     sp.add_argument("--output", "-o", required=True,
                     help="输出路径：目录（多张自动编号）或含扩展名的单文件；必须位于 outputs/<人类可读主题>/。")
     sp.add_argument("--n", type=int, default=1, help="生成数量，默认 1。")
@@ -795,7 +802,7 @@ def _add_common_output(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--format", choices=("png", "jpeg", "webp"), default="png",
                     help="保存格式（无 URL 后缀时的兜底），默认 png。")
     sp.add_argument("--poll-interval", type=int, default=5, help="异步轮询间隔秒，默认 5。")
-    sp.add_argument("--timeout", type=int, default=180, help="同步生成请求或异步轮询超时秒，默认 180；不包含图片下载。")
+    sp.add_argument("--timeout", type=int, default=None, help="同步生成请求或异步轮询超时秒，默认 180；不包含图片下载。")
     sp.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")
 
 
@@ -827,9 +834,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     p_chk = sub.add_parser("check", help="离线校验配置状态（不发起请求）")
     p_chk.add_argument("--env-file", help="指定 .env；默认从当前目录向上查找。")
+    p_chk.add_argument("--provider", help="媒体实例 ID；legacy 使用旧配置")
     p_chk.set_defaults(func=cmd_check)
 
     return parser.parse_args(argv)
+
+
+def run_media_instance(args: argparse.Namespace) -> bool:
+    """An explicit/default image instance wins over the legacy environment slot."""
+    provider = getattr(args, "provider", None)
+    if provider == "legacy":
+        return False
+    try:
+        from easel.media import runtime, generate_image
+        rt = runtime()
+    except (ImportError, RuntimeError):
+        if provider:
+            raise RuntimeError("媒体适配包不可用，无法选择生图实例")
+        return False
+    if not provider and not rt.load()["defaults"].get("image"):
+        return False
+    instance, _ = rt.resolve("image", provider)
+    if args.command == "check":
+        ref = instance['settings'].get('api_key_env')
+        if ref and not os.environ.get(ref):
+            raise RuntimeError(f"缺少凭证环境变量 {ref}")
+        print(json.dumps({'provider': instance['id'], 'model': instance['settings']['model'],
+                          'supports_edit': instance['settings']['supports_edit']}, ensure_ascii=False))
+        return True
+    if args.command == "variations":
+        raise RuntimeError("媒体实例不使用 variations 接口；请用 img2img 并明确改图指令")
+    if args.mode == "async":
+        raise RuntimeError("当前媒体实例使用同步图片接口")
+    result = generate_image(args.prompt, Path(args.output), provider=instance['id'], n=args.n,
+                            size=args.size, quality=getattr(args, 'quality', None), format=args.format,
+                            image=Path(args.image) if getattr(args, 'image', None) else None,
+                            mask=Path(args.mask) if getattr(args, 'mask', None) else None,
+                            timeout=args.timeout)
+    print(json.dumps(result, ensure_ascii=False))
+    _print_results([Path(p) for p in result['outputs']])
+    return True
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -838,6 +882,13 @@ def main(argv: list[str] | None = None) -> None:
         args.output = str(validate_output_path(args.output))
     env_file = Path(args.env_file) if getattr(args, "env_file", None) else find_default_env_file()
     load_env_file(env_file)
+    try:
+        if run_media_instance(args):
+            return
+    except (RuntimeError, ValueError, OSError) as exc:
+        fail(str(exc))
+    if hasattr(args, "timeout") and args.timeout is None:
+        args.timeout = 180
     args.func(args)
 
 
