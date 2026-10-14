@@ -526,3 +526,11 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 实例及默认保存在原媒体配置文件，凭证仅通过 EASEL_MEDIA_* 环境变量引用，不写入 Git。旧 IMG_* 保留以便显式调用。部署需安装适配包、构建前端、重启 Web，并仅同步 ai-image-gen 技能和 ai_image.py 共享脚本；不执行全量 workspace 同步。
 
 2026-10-14 验收：Flare、Sunburst、自部署 Qwen 均经新入口实际生成并保存1024×1024图片。当前执行进程对内网 Python HTTP 连接报 Errno 65，原生 curl 正常；Qwen 实例显式使用 curl，生成和图片下载都遵循该设置，未改其他媒体实例。GPT 实例保持 httpx。本次只验证文生图，实例暂不启用图片编辑能力。额度切换靠明确错误码和 Skill 策略；没有通过耗尽真实额度来测试。
+
+### 电商详情图统一入口
+
+`ecom-details-image/scripts/generate_image.py` 保留原 CLI，改为参数薄封装，实际调用 `ai_image.main`。无参考图使用 text2img，有参考图使用 img2img；模型、鉴权、提交与下载都由统一入口处理。新增 --provider/--mask，保留提示词文件与旧输出目录参数；比例转为对应像素，resolution只影响旧异步服务。输出遵守项目路径校验，每轮使用唯一文件名，避免覆盖原图。
+
+电商 Skill 读取 ai-image-gen 的同一套选择策略，不再指定另一份 .env 或绕过 UI 默认。图片编辑需实例声明 supports_edit；Qwen 仅文生图，不作为商品参考图编辑后备。配置迁移仅在真实编辑验证通过后启用对应 GPT 实例能力，不改变 image 默认和其他通道。仅同步本次电商 Skill/脚本及 ai_image.py，不执行全量同步。测试使用隔离的 EASEL_ROOT，不在内容库新增验收项目。
+
+2026-10-14 编辑验收：使用已有红色陶瓷杯图片，通过电商 CLI 分别调用 Flare 和 Sunburst 的 multipart `/images/edits`；两者均返回1024×1024图片，视觉检查保留杯体与杯柄并将背景改为浅蓝色。该单样本验证仅代表编辑链路打通，不保证所有商品细节精确还原。两个 GPT 实例启用 supports_edit，Qwen 保持关闭。

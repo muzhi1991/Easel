@@ -617,6 +617,8 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
         fail(f"无法读取输入图片：{exc}")
         return {}
     fields = {"model": model, "prompt": prompt, "n": str(args.n), "size": args.size}
+    if getattr(args, "quality", None):
+        fields["quality"] = args.quality
     files = [("image", path.name, mime, img_bytes)]
     if args.mask:
         mpath, mmime = _check_image(args.mask)
@@ -821,6 +823,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     p_i2i = sub.add_parser("img2img", help="图生图/图像编辑：--prompt + --image → 新图")
     p_i2i.add_argument("--prompt", required=True, help="编辑/改图指令 Prompt。")
+    p_i2i.add_argument("--quality", help="服务支持的图片编辑质量参数")
     p_i2i.add_argument("--image", required=True, help="输入图片路径。")
     p_i2i.add_argument("--mask", help="可选遮罩图（仅 OpenAI 同步 /images/edits 局部编辑用）。")
     _add_common_output(p_i2i)
