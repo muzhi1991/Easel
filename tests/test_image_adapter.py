@@ -161,3 +161,42 @@ def test_url_download_does_not_forward_api_key(tmp_path, monkeypatch):
     monkeypatch.setattr(image, 'client', factory)
     rt.submit('image', 'generate_image', ImageRequest('draw', tmp_path / 'out.png'))
     assert (tmp_path / 'out.png').is_file()
+
+
+@pytest.mark.parametrize('auto,editing,expected_size', [
+    (True, True, 'auto'),
+    (True, False, '1536x1536'),
+    (False, True, '1536x1536'),
+])
+def test_edit_auto_size_is_scoped_to_configured_edit_requests(
+        tmp_path, monkeypatch, auto, editing, expected_size):
+    import json
+    from email.parser import BytesParser
+    from email.policy import default
+
+    rt = MediaRuntime(tmp_path / 'config.json')
+    provider = instance(rt, edit=True)
+    provider['settings']['edit_size_auto'] = auto
+    rt.save_provider(provider)
+    source = tmp_path / 'input.png'
+    source.write_bytes(base64.b64decode(encoded()))
+
+    def handle(req):
+        if editing:
+            assert req.url.path == '/v1/images/edits'
+            message = BytesParser(policy=default).parsebytes(
+                ('Content-Type: ' + req.headers['content-type'] + '\r\n\r\n').encode() + req.content)
+            parts = {p.get_param('name', header='content-disposition'): p.get_payload(decode=True)
+                     for p in message.iter_parts()}
+            assert parts['size'].decode() == expected_size
+            assert parts['image'] == source.read_bytes()
+        else:
+            assert req.url.path == '/v1/images/generations'
+            assert json.loads(req.content)['size'] == expected_size
+        return httpx.Response(200, json={'data': [{'b64_json': encoded()}]})
+
+    mock(monkeypatch, handle)
+    result = rt.submit('image', 'generate_image', ImageRequest(
+        'change background', tmp_path / 'out.png', size='1536x1536',
+        image=source if editing else None))
+    assert Path(result['outputs'][0]).is_file()

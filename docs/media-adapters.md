@@ -531,6 +531,15 @@ Chrome实查设置→配音：内网Qwen和Fish同一列表，Qwen为默认、Fi
 
 `ecom-details-image/scripts/generate_image.py` 保留原 CLI，改为参数薄封装，实际调用 `ai_image.main`。无参考图使用 text2img，有参考图使用 img2img；模型、鉴权、提交与下载都由统一入口处理。新增 --provider/--mask，保留提示词文件与旧输出目录参数；比例转为对应像素，resolution只影响旧异步服务。输出遵守项目路径校验，每轮使用唯一文件名，避免覆盖原图。
 
-电商 Skill 读取 ai-image-gen 的同一套选择策略，不再指定另一份 .env 或绕过 UI 默认。图片编辑需实例声明 supports_edit；Qwen 仅文生图，不作为商品参考图编辑后备。配置迁移仅在真实编辑验证通过后启用对应 GPT 实例能力，不改变 image 默认和其他通道。仅同步本次电商 Skill/脚本及 ai_image.py，不执行全量同步。测试使用隔离的 EASEL_ROOT，不在内容库新增验收项目。
+电商 Skill 读取 ai-image-gen 的同一套选择策略，不再指定另一份 .env 或绕过 UI 默认。图片编辑需实例声明 supports_edit；Qwen 普通单图编辑接入见下节；需要遮罩或多参考图时不能选 Qwen。配置迁移仅在真实编辑验证通过后启用对应 GPT 实例能力，不改变 image 默认和其他通道。仅同步本次电商 Skill/脚本及 ai_image.py，不执行全量同步。测试使用隔离的 EASEL_ROOT，不在内容库新增验收项目。
 
 2026-10-14 编辑验收：使用已有红色陶瓷杯图片，通过电商 CLI 分别调用 Flare 和 Sunburst 的 multipart `/images/edits`；两者均返回1024×1024图片，视觉检查保留杯体与杯柄并将背景改为浅蓝色。该单样本验证仅代表编辑链路打通，不保证所有商品细节精确还原。两个 GPT 实例启用 supports_edit，Qwen 保持关闭。
+
+
+### Qwen 普通单图编辑（0.7.1）
+
+新版服务提供 multipart `/v1/images/edits`，原模型别名同时支持 generations/edits。实例启用 `supports_edit=true`、`edit_size_auto=true`；后者仅在有参考图时将 size 设为 auto，保留原图比例，使用服务默认 resolution=1024。旧实例缺省 false，GPT 编辑与 Qwen 文生图的尺寸请求不变。该字段由现有媒体配置表单自动展示，不在通用适配器中硬编码模型或个人地址。
+
+当前按一张参考图、一张输出使用；Skill 禁用 Qwen 的 quality、mask、多参考图及 variations，未声明或未验证的能力不推断支持。需要固定输出尺寸时应另行裁剪/缩放并告知用户，不能把编辑的 size 当作输出尺寸保证。启用编辑不改变默认 Flare、额度/对比策略或质量重跑选择 Sunburst 的策略。
+
+2026-10-14 接口验收：默认 size=1024x1024 返回400并要求 auto；改为 auto 后，现有适配器约31秒完成编辑、下载与保存，红杯保留且背景改为浅蓝色。测试图片在系统临时目录。部署备份用户配置，仅修改 Qwen 实例上述两个开关；同步 ai-image-gen 与电商技能说明，不执行全量 workspace 同步。
