@@ -20,6 +20,7 @@ interface SidebarProps {
   onPersonaChange: (persona: string) => void;
   onNewProfile: () => void;
   sessions: ChatSession[];
+  onImportLocal: () => void;
   activeSessionId: string | null;
   onSessionSelect: (id: string) => void;
   onSessionDelete: (id: string) => void;
@@ -50,6 +51,7 @@ export default function Sidebar({
   onPersonaChange,
   onNewProfile,
   sessions,
+  onImportLocal,
   activeSessionId,
   onSessionSelect,
   onSessionDelete,
@@ -99,7 +101,7 @@ export default function Sidebar({
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => onSessionSelect(s.id)}
       >
-        <span className="session-item-title">{s.title}</span>
+        <span className="session-item-title">{s.title}{s.source !== 'server' && <small className="local-history-badge">本地旧记录</small>}</span>
         <div className="session-actions">
           <button className="session-act" title="重命名"
             onClick={(e) => { e.stopPropagation(); startRename(s); }}><IconEdit size={14} /></button>
@@ -161,6 +163,8 @@ export default function Sidebar({
           </button>
         </div>
         {active.map((s) => renderItem(s, false))}
+        {sessions.some((s) => s.source !== 'server' && s.messages.length > 0) && <button
+          className="local-history-import" onClick={onImportLocal}>迁移本浏览器旧对话</button>}
 
         {archived.length > 0 && (
           <>

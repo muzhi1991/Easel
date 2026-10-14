@@ -30,6 +30,8 @@ import {
   saveActiveId,
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
+import type { SharedTurn } from './lib/api';
+import { loadSharedSessions, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
 
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
 
@@ -58,6 +60,14 @@ export default function App() {
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyReady, setHistoryReady] = useState(false);
+  const [showImportLocal, setShowImportLocal] = useState(false);
+  const [importingLocal, setImportingLocal] = useState(false);
+  const historyBusy = useRef(new Set<string>());
+  const reportHistoryError = useCallback((error: unknown) => {
+    setHistoryError(error instanceof Error ? error.message : '共享会话暂时不可用，请重试');
+  }, []);
   // 装完还没配模型时，首开要把用户直接带到模型设置页（安装脚本不再在终端问 Key）
   const [needModelSetup, setNeedModelSetup] = useState(false);
 
@@ -81,78 +91,30 @@ export default function App() {
   }, []);
   const clearOutputsJump = useCallback(() => setOutputsJump(''), []);
 
-  // 挂载时决定进哪个会话。规则：
-  //  - 同一标签刷新（sessionStorage 记着本标签的会话）→ 直接续上（同标签不算冲突）。
-  //  - 新开标签/窗口 → 若「上次活跃会话」正被另一个存活标签占用（跨标签 BroadcastChannel 探测），
-  //    则开一个新会话，避免两个窗口撞同一会话 → openclaw 并发 takeover 崩溃（后端还有 flock 兜底）。
-  //  - 否则续上上次会话（保留「关页重开续接」的体验）。
+  // Active selection remains tab-local; history itself is loaded from the service.
   const TAB_SESSION_KEY = 'easel_tab_session';
   useEffect(() => {
-    const existing = loadSessions();
-    let ch: BroadcastChannel | null = null;
-    try { ch = new BroadcastChannel('easel-session'); } catch { ch = null; }
-
-    const settle = (id: string, sess: ChatSession[]) => {
-      setSessions(sess);
-      setActiveSessionId(id);
-      const s = sess.find((x) => x.id === id);
-      if (s) setSelectedPersona(s.persona || '');
-      try { sessionStorage.setItem(TAB_SESSION_KEY, id); } catch { /* ignore */ }
-      ch?.postMessage({ type: 'claim', sessionId: id });
+    let cancelled = false;
+    const initialize = async () => {
+      try {
+        const shared = await loadSharedSessions();
+        if (cancelled) return;
+        const existing = [...shared, ...loadSessions()];
+        const last = sessionStorage.getItem(TAB_SESSION_KEY) || loadActiveId();
+        const target = existing.find((s) => s.id === last) || existing.find((s) => s.id === `shared_${last}`);
+        const selected = target || createSession();
+        setSessions(target ? existing : [selected, ...existing]);
+        setActiveSessionId(selected.id);
+        setSelectedPersona(selected.persona || '');
+        setHistoryReady(true);
+        setHistoryError('');
+      } catch (error) { if (!cancelled) reportHistoryError(error); }
     };
-    const openNew = (sess: ChatSession[]) => {
-      const ns = createSession();
-      const updated = [ns, ...sess];
-      saveSessions(updated);
-      settle(ns.id, updated);
-    };
-
-    // 持久监听：别的标签问「谁在用会话 X」时，若正是本标签当前会话就应答 owned
-    const onMsg = (e: MessageEvent) => {
-      const d = e.data as { type?: string; sessionId?: string } | null;
-      if (d?.type === 'query' && d.sessionId && d.sessionId === activeIdRef.current) {
-        ch?.postMessage({ type: 'owned', sessionId: d.sessionId });
-      }
-    };
-    ch?.addEventListener('message', onMsg);
-
-    // 1) 本标签刷新：续本标签原会话
-    let tabOwn: string | null = null;
-    try { tabOwn = sessionStorage.getItem(TAB_SESSION_KEY); } catch { tabOwn = null; }
-    if (tabOwn && existing.find((s) => s.id === tabOwn)) {
-      settle(tabOwn, existing);
-      return () => { ch?.removeEventListener('message', onMsg); ch?.close(); };
-    }
-
-    // 2) 新标签：候选=上次活跃会话；先跨标签问有没有别的活标签占着它
-    const lastId = loadActiveId();
-    const candidate = lastId && existing.find((s) => s.id === lastId) ? lastId : null;
-    if (candidate && ch) {
-      let taken = false;
-      const probe = (e: MessageEvent) => {
-        const d = e.data as { type?: string; sessionId?: string } | null;
-        if (d?.type === 'owned' && d.sessionId === candidate) taken = true;
-      };
-      ch.addEventListener('message', probe);
-      ch.postMessage({ type: 'query', sessionId: candidate });
-      const t = setTimeout(() => {
-        ch?.removeEventListener('message', probe);
-        if (taken) openNew(existing);      // 另一个窗口在用 → 开新会话
-        else settle(candidate, existing);  // 没人占 → 续上
-      }, 250);
-      return () => { clearTimeout(t); ch?.removeEventListener('message', probe); ch?.removeEventListener('message', onMsg); ch?.close(); };
-    }
-
-    // 3) 无候选 / 不支持 BroadcastChannel：退化为原逻辑（复用空会话或新建；后端 flock 兜底防崩）
-    if (candidate) {
-      settle(candidate, existing);
-    } else {
-      const empty = existing.find((s) => s.messages.length === 0);
-      if (empty) settle(empty.id, existing);
-      else openNew(existing);
-    }
-    return () => { ch?.removeEventListener('message', onMsg); ch?.close(); };
-  }, []);
+    void initialize();
+    const retry = () => { if (!cancelled) void initialize(); };
+    window.addEventListener('easel-retry-history', retry);
+    return () => { cancelled = true; window.removeEventListener('easel-retry-history', retry); };
+  }, [reportHistoryError]);
 
   // 持久化当前活跃会话 id，重开网页据此续接上次对话（修复"今天再问就忘了"）。
   // 仅在非空时写：避免挂载首刷 activeSessionId 尚为 null 时误清掉已存的 id。
@@ -210,8 +172,6 @@ export default function App() {
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // 当前活跃会话 id 的 ref：供跨标签「谁在用会话 X」查询时即时应答（见挂载 effect）
-  const activeIdRef = useRef<string | null>(activeSessionId);
-  useEffect(() => { activeIdRef.current = activeSessionId; }, [activeSessionId]);
 
   // ---- 流式对话：状态与生命周期都放在 App（永不卸载），切页/切 ChatPage 都不中断/丢失 ----
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
@@ -222,6 +182,66 @@ export default function App() {
   const typingBuf = useRef<Record<string, string>>({});
   const typingTimer = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const TYPING_INTERVAL = 12;          // 每 tick 间隔 ms（短回复约 83 字/秒：快且有逐字感）
+
+  const refreshShared = useCallback(async (forceId?: string) => {
+    const knownIds = new Set(sessionsRef.current.map((s) => s.id));
+    const shared = await loadSharedSessions();
+    setSessions((prev) => {
+      const byId = new Map(shared.map((item) => [item.id, item]));
+      const retained = prev.filter((item) => item.source === 'server' && (
+        (!byId.has(item.id) && (!item.revision || !knownIds.has(item.id))) ||
+        (byId.has(item.id) && (item.revision || 0) > (byId.get(item.id)?.revision || 0)) || historyBusy.current.has(item.id) ||
+        (item.id !== forceId && !!streamCtl.current[item.id])
+      ));
+      const keep = new Set(retained.map((item) => item.id));
+      return [...retained, ...shared.filter((item) => !keep.has(item.id)), ...loadSessions()];
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!historyReady) return;
+    const refresh = () => { void refreshShared().catch(reportHistoryError); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const timer = setInterval(onVisible, 5000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible); };
+  }, [historyReady, refreshShared, reportHistoryError]);
+
+  const updateShared = useCallback(async (id: string, changes: Partial<ChatSession>) => {
+    const current = sessionsRef.current.find((item) => item.id === id);
+    if (!current || historyBusy.current.has(id)) return;
+    historyBusy.current.add(id);
+    try {
+      const saved = await patchSharedSession(current, changes);
+      setSessions((prev) => prev.map((item) => item.id === id ? saved : item));
+      setHistoryError('');
+    } catch (error) {
+      reportHistoryError(error);
+    } finally {
+      historyBusy.current.delete(id);
+      void refreshShared().catch(reportHistoryError);
+    }
+  }, [refreshShared, reportHistoryError]);
+
+  const handleImportLocal = async () => {
+    if (Object.keys(streamCtl.current).length || historyBusy.current.size || sessionsRef.current.some((s) => s.pendingTurnId)) {
+      setHistoryError('请先等待当前对话完成，再迁移本浏览器的旧记录。');
+      return;
+    }
+    setImportingLocal(true);
+    historyBusy.current.add('import');
+    try {
+      await importLocalSessions();
+      setShowImportLocal(false);
+      if (activeSessionId && sessionsRef.current.find((s) => s.id === activeSessionId && s.source !== 'server' && s.messages.length)) {
+        setActiveSessionId(`shared_${activeSessionId}`);
+      }
+      await refreshShared();
+      setHistoryError('');
+    } catch (error) { reportHistoryError(error); }
+    finally { historyBusy.current.delete('import'); setImportingLocal(false); }
+  };
 
   const pumpTyping = (sessionId: string) => {
     const buf = typingBuf.current[sessionId] || '';
@@ -257,6 +277,12 @@ export default function App() {
   };
 
   const appendAssistant = useCallback((sessionId: string, msg: ChatMessage, sessionKey?: string) => {
+    if (sessionsRef.current.find((s) => s.id === sessionId)?.source === 'server') {
+      // The supervisor persists even when no browser is connected. Never append a duplicate locally.
+      if (msg.content.includes('Error:')) setHistoryError(msg.content);
+      void refreshShared(sessionId).catch(reportHistoryError);
+      return;
+    }
     setSessions((prev) => {
       const next = prev.map((s) =>
         s.id === sessionId
@@ -265,7 +291,7 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-  }, []);
+  }, [refreshShared, reportHistoryError]);
 
   const clearStream = useCallback((sessionId: string) => {
     // 打字机收尾：剩余队列立刻吐出，避免结束瞬间内容被截断
@@ -286,7 +312,8 @@ export default function App() {
     persona: string | undefined,
     attachments: UploadedFile[] = [],
     thinking?: ThinkingLevel,
-  ) => {
+    sharedTurn?: SharedTurn,
+  ) => new Promise<boolean>((resolve) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
     setSessions((prev) => {
@@ -307,6 +334,7 @@ export default function App() {
         ensureTypingPump(sessionId);
       },
       (sessionKey) => {
+        resolve(true);
         // done 不能立即 flush——token 和 done 几乎同时到达（OpenClaw 攒批），
         // 立即 flush 会把整包瞬间冲出，打字机白做。等队列吐完再落盘。
         const waitAndFinalize = () => {
@@ -325,6 +353,7 @@ export default function App() {
         waitAndFinalize();
       },
       (err) => {
+        resolve(false);
         const waitAndFinalize = () => {
           if (typingBuf.current[sessionId]) {
             setTimeout(waitAndFinalize, 60);
@@ -383,17 +412,20 @@ export default function App() {
       // onHeartbeat：防呆心跳（30s 静默）。只设独立的「未卡住」提示，绝不写 activity/thinking → 不顶掉真实状态。
       (note) => setStreams((p) => (p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
       thinking,
+      sharedTurn,
+      () => resolve(true),
     );
-  }, [appendAssistant, clearStream]);
+  }), [appendAssistant, clearStream]);
 
   // 刷新/重开页面后按 eventId=0 重放当前 job，再继续实时 tail；旧任务无事件日志时退回最终快照。
   const resumePendingTurn = useCallback((sessionId: string) => {
     if (streamCtl.current[sessionId] || streamAcc.current[sessionId]) return;  // 本标签正在跑，不插手
     const s = sessionsRef.current.find((x) => x.id === sessionId);
     const last = s?.messages[s.messages.length - 1];
+    if (s?.source === 'server' && !s.pendingTurnId) return;
     if (!last || last.role !== 'user') return;   // 没有悬空的用户消息 = 无需恢复
     let turnId = s.pendingTurnId;
-    try { turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
+    try { if (s.source !== 'server') turnId = sessionStorage.getItem(`easel_pending_turn:${sessionId}`) || turnId; } catch { /* use persisted id */ }
     streamAcc.current[sessionId] = { content: '', thinking: '', steps: [], questions: [] };
     setStreams((p) => ({ ...p, [sessionId]: { content: '', thinking: '', activity: '⏳ 正在接回上一轮结果…', questions: [] } }));
     typingBuf.current[sessionId] = '';
@@ -498,10 +530,10 @@ export default function App() {
   // 活跃会话确定后（含挂载首刷）尝试恢复它悬空的一轮
   useEffect(() => {
     if (activeSessionId) resumePendingTurn(activeSessionId);
-  }, [activeSessionId, resumePendingTurn]);
+  }, [activeSessionId, activeSession?.pendingTurnId, resumePendingTurn]);
 
   // 落用户消息（可选先把 messages 截断到 truncateAt）→ 启动流。retry/edit 都走这里。
-  const sendUserAndStream = useCallback((
+  const sendUserAndStream = useCallback(async (
     sessionId: string,
     displayText: string,
     attachments: UploadedFile[] = [],
@@ -510,33 +542,40 @@ export default function App() {
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
-    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId]) return;
-    const cur = sessionsRef.current.find((s) => s.id === sessionId);
-    const persona = cur ? cur.persona : selectedPersona || undefined;
-    setSessions((prev) => {
-      const next = prev.map((s) => {
-        if (s.id !== sessionId) return s;
-        const base = truncateAt != null ? s.messages.slice(0, truncateAt) : s.messages;
-        const updated = {
-          ...s,
-          messages: [...base, {
-            role: 'user',
-            content: visible,
-            ...(attachments.length ? { attachments } : {}),
-            ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
-          } as ChatMessage],
-        };
-        updateSessionTitle(updated);
-        return updated;
-      });
+    if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || historyBusy.current.has(sessionId)) return false;
+    let cur = sessionsRef.current.find((s) => s.id === sessionId);
+    if (!cur || !historyReady) return false;
+    if (cur.pendingTurnId) { setHistoryError('此会话正在回复中，请等待完成或先停止。'); return false; }
+    historyBusy.current.add(sessionId);
+    try {
+      if (cur.source === 'server') cur = await ensureSharedSession(cur);
+      const base = truncateAt != null ? cur.messages.slice(0, truncateAt) : cur.messages;
+      const updated: ChatSession = { ...cur, messages: [...base, {
+        role: 'user', content: visible,
+        ...(attachments.length ? { attachments } : {}),
+        ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
+      }] };
+      updateSessionTitle(updated);
+      // Update the ref before starting the stream so an immediate response sees the same identity.
+      const next = sessionsRef.current.map((s) => s.id === sessionId ? updated : s);
+      sessionsRef.current = next;
+      setSessions(next);
       saveSessions(next);
-      return next;
-    });
-    startStream(sessionId, agentMessage, persona, attachments, cur?.thinking);
-  }, [selectedPersona, startStream]);
+      setHistoryError('');
+      return await startStream(sessionId, agentMessage, cur.persona, attachments, cur.thinking,
+        cur.source === 'server' ? {
+          conversationId: cur.id, revision: cur.revision!, displayMessage: visible,
+          conversationTitle: updated.title, truncateAt,
+        } : undefined);
+    } catch (error) {
+      reportHistoryError(error);
+      void refreshShared().catch(reportHistoryError);
+      return false;
+    } finally { historyBusy.current.delete(sessionId); }
+  }, [historyReady, startStream, reportHistoryError, refreshShared]);
 
   const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[]) => {
-    sendUserAndStream(sessionId, displayText, attachments);
+    return sendUserAndStream(sessionId, displayText, attachments);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -555,12 +594,20 @@ export default function App() {
     const prompt = `围绕当前热点「${title}」：先判断它适不适合我的账号赛道；若合适，给 2-3 个差异化的二创角度，并把你最推荐的那条写成可直接发布的文案初稿。`;
     const ns = createSession(selectedPersona || undefined);
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
+    sessionsRef.current = [ns, ...sessionsRef.current];
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
-    sendUserAndStream(ns.id, prompt);
+    void sendUserAndStream(ns.id, prompt);
   }, [selectedPersona, sendUserAndStream]);
 
   const handleStopStream = useCallback((sessionId: string) => {
+    if (sessionsRef.current.find((s) => s.id === sessionId)?.source === 'server') {
+      streamCtl.current[sessionId]?.abort();
+      clearStream(sessionId);
+      void stopChat(sessionId).then(() => refreshShared(sessionId)).catch(reportHistoryError);
+      try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
+      return;
+    }
     streamCtl.current[sessionId]?.abort();
     // 告诉后端**真正终止**这一轮 agent 并释放会话锁——否则后端进程还在跑、占着锁，下一句会被拦
     void stopChat(sessionId).catch(() => { /* 后端可能已结束，忽略 */ });
@@ -582,19 +629,21 @@ export default function App() {
       return next;
     });
     try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
-  }, [appendAssistant, clearStream]);
+  }, [appendAssistant, clearStream, refreshShared, reportHistoryError]);
 
   const handleSessionRename = useCallback((id: string, title: string) => {
     const t = title.trim();
     if (!t) return;
+    if (sessionsRef.current.find((s) => s.id === id)?.source === 'server') { void updateShared(id, { title: t }); return; }
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, title: t } : s));
       saveSessions(next);
       return next;
     });
-  }, []);
+  }, [updateShared]);
 
   const handleSessionArchive = useCallback((id: string, archived: boolean) => {
+    if (sessionsRef.current.find((s) => s.id === id)?.source === 'server') { void updateShared(id, { archived }); return; }
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, archived } : s));
       saveSessions(next);
@@ -612,7 +661,7 @@ export default function App() {
       }
       setCurrentPage('chat');
     }
-  }, [activeSessionId, selectedPersona]);
+  }, [activeSessionId, selectedPersona, updateShared]);
 
   const handleNewChat = useCallback(() => {
     const newSession = createSession(selectedPersona || undefined);
@@ -634,10 +683,23 @@ export default function App() {
     setCurrentPage('chat');
   }, [sessions]);
 
-  const handleSessionDelete = useCallback((id: string) => {
+  const handleSessionDelete = useCallback(async (id: string) => {
     if (!window.confirm('确定删除这条对话？')) return;
 
     const target = sessionsRef.current.find((s) => s.id === id);
+    if (target?.source === 'server') {
+      if (historyBusy.current.has(id)) return;
+      historyBusy.current.add(id);
+      try {
+        // Running shared tasks must be stopped explicitly; a stale browser cannot delete a new turn.
+        await deleteSharedSession(target);
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+        if (activeSessionId === id) { setActiveSessionId(null); setCurrentPage('dashboard'); }
+        setHistoryError('');
+      } catch (error) { reportHistoryError(error); }
+      finally { historyBusy.current.delete(id); void refreshShared().catch(reportHistoryError); }
+      return;
+    }
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
       ? stopChat(id).catch(() => ({ stopped: false }))
@@ -646,7 +708,8 @@ export default function App() {
     clearStream(id);
     try { sessionStorage.removeItem(`easel_pending_turn:${id}`); } catch { /* ignore */ }
 
-    if (target?.sessionKey) {
+    const sharedCopy = sessionsRef.current.some((s) => s.source === 'server' && s.agentSessionId === id);
+    if (target?.sessionKey && !sharedCopy) {
       // Do not delete OpenClaw's session record while its agent is still
       // writing to it; the stop endpoint waits for backend cleanup first.
       void stopped.then(() => deleteRemoteSession(target.sessionKey as string)).catch(() => {});
@@ -668,7 +731,7 @@ export default function App() {
       }
       return updated;
     });
-  }, [activeSessionId, clearStream]);
+  }, [activeSessionId, clearStream, refreshShared, reportHistoryError]);
 
   // 首次引导：跳过（用通用模式）
   const dismissRecommend = useCallback(() => {
@@ -729,10 +792,13 @@ export default function App() {
             apiDirect={apiDirect}
             key={activeSession.id}
             session={activeSession}
-            onThinkingChange={(thinking) => setSessions((prev) => {
+            onThinkingChange={(thinking) => {
+              if (activeSession.source === 'server') { void updateShared(activeSession.id, { thinking }); return; }
+              setSessions((prev) => {
               const next = prev.map((s) => s.id === activeSession.id ? { ...s, thinking } : s);
               saveSessions(next); return next;
-            })}
+              });
+            }}
             stream={streams[activeSession.id]}
             onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
             onStop={() => handleStopStream(activeSession.id)}
@@ -787,6 +853,7 @@ export default function App() {
     const cur = sessionsRef.current.find((s) => s.id === activeSessionId);
     if (cur && (cur.persona || '') === persona) return;
     if (cur && cur.messages.length === 0) {
+      if (cur.source === 'server' && cur.revision) { void updateShared(cur.id, { persona: persona || undefined }); return; }
       setSessions((prev) => {
         const updated = prev.map((s) =>
           s.id === activeSessionId ? { ...s, persona: persona || undefined } : s);
@@ -802,7 +869,7 @@ export default function App() {
       return updated;
     });
     setActiveSessionId(newSession.id);
-  }, [activeSessionId, currentPage]);
+  }, [activeSessionId, currentPage, updateShared]);
 
   return (
     <>
@@ -817,6 +884,7 @@ export default function App() {
         onPersonaChange={(persona) => { handlePersonaChange(persona); close(); }}
         onNewProfile={() => { setShowWizard(true); close(); }}
         sessions={sessions}
+        onImportLocal={() => setShowImportLocal(true)}
         activeSessionId={activeSessionId}
         onSessionSelect={(id) => { handleSessionSelect(id); close(); }}
         onSessionDelete={handleSessionDelete}
@@ -831,11 +899,29 @@ export default function App() {
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}
+        {historyError && <div className="history-notice" role="alert">
+          <span>{historyError}</span>
+          <button className="btn btn-sm" onClick={() => {
+            if (historyReady) void refreshShared().then(() => setHistoryError('')).catch(reportHistoryError);
+            else window.dispatchEvent(new Event('easel-retry-history'));
+          }}>刷新会话</button>
+          <button className="btn btn-sm" onClick={() => setHistoryError('')} aria-label="关闭提示">×</button>
+        </div>}
         <div className="page-host">
           {renderPage()}
         </div>
       </ResponsiveShell>
 
+      {showImportLocal && <div className="overlay">
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="import-history-title" style={{ width: 420, maxWidth: '100%' }}>
+          <h2 id="import-history-title">迁移本浏览器旧对话</h2>
+          <p>将此浏览器的旧对话复制到服务端，供手机和其他电脑查看。本地保留备份，其他浏览器不会自动迁移。</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+            <button className="btn" disabled={importingLocal} onClick={() => setShowImportLocal(false)}>取消</button>
+            <button className="btn btn-primary" disabled={importingLocal} onClick={() => void handleImportLocal()}>{importingLocal ? '迁移中…' : '复制到服务端'}</button>
+          </div>
+        </div>
+      </div>}
       {/* 首次使用：推荐配置画像 */}
       {showRecommend && (
         <div className="overlay">

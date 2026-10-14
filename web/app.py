@@ -51,6 +51,7 @@ from easel.persona import (load_profile_text, persona_prefix, chat_turn_message,
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, api_config, api_mode,
                               history_path, read_settings, stream_chat)
+from easel.conversations import Conversations, Conflict as ConversationConflict, Missing as ConversationMissing
 from easel import harnesses
 from easel.harnesses import store as harness_store
 from easel.harnesses.base import HarnessError, RunRequest
@@ -464,6 +465,7 @@ async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
     global _HARNESS_LOOP
     _HARNESS_LOOP = asyncio.get_running_loop()
+    _conversations().recover(SESSIONS_DIR / "jobs")
     yield
     tasks = list(_HARNESS_TASKS)
     for task in tasks:
@@ -2756,7 +2758,89 @@ class AttachmentRef(BaseModel):
     path: str
 
 
+def _conversations():
+    return Conversations(SESSIONS_DIR / "conversations.sqlite")
+
+
+def _conversation_call(method, *args, **kwargs):
+    try:
+        return getattr(_conversations(), method)(*args, **kwargs)
+    except ConversationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ConversationMissing as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class ConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    agentContent: str | None = None
+    attachments: list[AttachmentRef] | None = None
+    thinking: str | None = None
+    activity: str | None = None
+
+
+class ConversationCreate(BaseModel):
+    id: str = Field(pattern=r"^shared_[A-Za-z0-9_-]{1,120}$")
+    title: str = Field(default="New Chat", max_length=500)
+    created: float
+    persona: str | None = None
+    thinking: ThinkingLevel | None = None
+    archived: bool = False
+    messages: list[ConversationMessage] = Field(default_factory=list)
+    sessionKey: str | None = None
+
+
+class ConversationPatch(BaseModel):
+    revision: int = Field(ge=1)
+    title: str | None = Field(default=None, max_length=500)
+    persona: str | None = None
+    thinking: ThinkingLevel | None = None
+    archived: bool | None = None
+
+
+@app.get("/api/conversations")
+def api_conversations():
+    return _conversations().list()
+
+
+@app.post("/api/conversations")
+def api_conversation_create(req: ConversationCreate):
+    return _conversation_call("create", req.model_dump(exclude_none=True))
+
+
+@app.post("/api/conversations/import")
+def api_conversations_import(req: list[ConversationCreate]):
+    # Explicit import only. Other clients never call this during normal loading.
+    return [_conversation_call("create", item.model_dump(exclude_none=True), importing=True)
+            for item in req]
+
+
+@app.get("/api/conversations/{identifier}")
+def api_conversation_get(identifier: str):
+    return _conversation_call("get", identifier)
+
+
+@app.patch("/api/conversations/{identifier}")
+def api_conversation_patch(identifier: str, req: ConversationPatch):
+    changes = req.model_dump(exclude_unset=True, exclude={"revision"})
+    if changes.get("title", "") is None or changes.get("archived", False) is None:
+        raise HTTPException(422, "标题和归档状态不能为空")
+    return _conversation_call("patch", identifier, req.revision, changes)
+
+
+@app.delete("/api/conversations/{identifier}")
+def api_conversation_delete(identifier: str, revision: int):
+    _conversation_call("delete", identifier, revision)
+    return {"ok": True}
+
+
 class ChatRequest(BaseModel):
+    conversationId: str | None = None
+    revision: int | None = Field(default=None, ge=1)
+    displayMessage: str | None = None
+    conversationTitle: str | None = Field(default=None, max_length=500)
+    truncateAt: int | None = Field(default=None, ge=0)
     thinking: ThinkingLevel | None = None
     message: str
     persona: str | None = None
@@ -3377,6 +3461,13 @@ async def api_chat_stream(req: ChatRequest):
     token delta 转成 SSE `token`、thinking delta 转成 `thinking`。stdout 仅留作错误/兜底。
     """
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
+    if req.conversationId:
+        shared = _conversation_call("get", req.conversationId)
+        if req.sessionId != shared["agentSessionId"] or not req.turnId or not req.revision:
+            raise HTTPException(400, "共享会话请求缺少有效的轮次或版本")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", req.turnId):
+            raise HTTPException(400, "无效的轮次标识")
+        req = req.model_copy(update={"persona": shared.get("persona"), "thinking": shared.get("thinking")})
     runtime = _chat_backend(req.sessionId)
     config = _harness_settings()
     direct = runtime == "api"
@@ -3389,6 +3480,23 @@ async def api_chat_stream(req: ChatRequest):
             raise HTTPException(409, "此会话属于 API 直连，请新建会话使用 OpenClaw")
         message = _chat_message(req)
     thinking = req.thinking or _agent_thinking_level()
+
+    if req.conversationId:
+        user_message = {"role": "user", "content": req.displayMessage if req.displayMessage is not None else req.message}
+        if req.attachments:
+            user_message["attachments"] = [a.model_dump() for a in req.attachments]
+        if user_message["content"] != req.message:
+            user_message["agentContent"] = req.message
+        _conversation_call("begin", req.conversationId, req.revision, req.turnId,
+                           user_message, req.conversationTitle, req.truncateAt)
+
+    shared_output = {"role": "assistant", "content": "", "thinking": "", "activity": ""}
+
+    def finish_shared(session_key=None):
+        if req.conversationId:
+            output = dict(shared_output)
+            output["content"] = output["content"] or "（无输出）"
+            _conversations().finish(req.conversationId, req.turnId, output, session_key)
 
     # supervisor（跑 openclaw run）与 forward（转发 SSE 给浏览器）之间的事件通道。
     # 关键：run 跑在独立后台任务里，客户端断开只结束 forward，不取消 supervisor →
@@ -3418,6 +3526,15 @@ async def api_chat_stream(req: ChatRequest):
 
         def to_client(kind, text=None, **extra):
             nonlocal event_seq
+            if req.conversationId:
+                if kind == "token":
+                    shared_output["content"] += text or ""
+                elif kind == "thinking":
+                    shared_output["thinking"] = (shared_output["thinking"] + (text or ""))[-4000:]
+                elif kind == "activity" and text:
+                    shared_output["activity"] += ("\n" if shared_output["activity"] else "") + text
+                elif kind == "error":
+                    shared_output["content"] += f"\n\nError: {text}"
             event_seq += 1
             data = ({"sessionKey": extra.get("sessionKey")} if kind == "done" else text)
             event = {"id": event_seq, "event": kind, "data": data}
@@ -3889,6 +4006,8 @@ async def api_chat_stream(req: ChatRequest):
             if is_http and emitted:
                 _pin_transport(sk, "http")
             user_stopped = sk in _STOPPED_CHAT
+            if user_stopped and req.conversationId:
+                to_client("token", "\n\n_（已停止）_")
             _STOPPED_CHAT.discard(sk)
             # Reaching finally while the child is alive means timeout, explicit
             # stop, cancellation, or an internal stream failure. Never release
@@ -3945,7 +4064,16 @@ async def api_chat_stream(req: ChatRequest):
             client_q.put_nowait(CLIENT_DONE)
 
     # 把 run 跑在独立后台任务里（持强引用防 GC）——客户端断开不取消它。
-    task = asyncio.create_task(supervisor())
+    async def supervised_shared_turn():
+        try:
+            await supervisor()
+        except BaseException:
+            shared_output["content"] += "\n\n（本轮执行中断，请重试。）"
+            raise
+        finally:
+            finish_shared(req.sessionId)
+
+    task = asyncio.create_task(supervised_shared_turn())
     _BG_TASKS.add(task)
 
     def _bg_done(t):

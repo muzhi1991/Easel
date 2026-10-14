@@ -25,6 +25,7 @@ function setup(sessions, activeSessionId, currentPage = 'chat') {
   const state = { sessions, activeSessionId, selectedPersona: undefined, saved: undefined, page: currentPage };
   const changePersona = runInNewContext(outputText, {
     activeSessionId,
+    updateShared: () => {},
     currentPage,
     sessionsRef: { current: sessions },
     useCallback: callback => callback,

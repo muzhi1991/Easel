@@ -5,6 +5,13 @@ function getBasePath(): string {
 }
 
 const BASE = getBasePath();
+// Shared UI IDs are namespaced; imports retain the original Agent / inbox identity.
+export const agentSessionId = (id: string): string => id.startsWith('shared_') ? id.slice(7) : id;
+export interface SharedTurn {
+  conversationId: string; revision: number; displayMessage: string;
+  conversationTitle: string; truncateAt?: number;
+}
+
 
 export interface MediaField {
   key: string; label: string; type: 'text' | 'url' | 'number' | 'boolean' | 'secret_ref';
@@ -402,7 +409,7 @@ export async function questionStatus(
 export async function uploadFiles(files: File[], sessionId: string): Promise<UploadedFile[]> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
-  fd.append('sessionId', sessionId);
+  fd.append('sessionId', agentSessionId(sessionId));
   const r = await request<{ ok: boolean; files: UploadedFile[] }>('/api/upload', { method: 'POST', body: fd });
   return r.files;
 }
@@ -412,7 +419,7 @@ export interface AdoptedFile { id: string; name: string; path: string; }
 export async function adoptOversize(files: File[], sessionId: string): Promise<AdoptedFile[]> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
-  fd.append('sessionId', sessionId);
+  fd.append('sessionId', agentSessionId(sessionId));
   const r = await request<{ ok: boolean; files: AdoptedFile[] }>('/api/upload/local', { method: 'POST', body: fd });
   return r.files;
 }
@@ -605,7 +612,7 @@ export function stopChat(sessionId: string): Promise<{ stopped: boolean }> {
   return request('/api/chat/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId: agentSessionId(sessionId) }),
   });
 }
 
@@ -626,6 +633,8 @@ export function streamChat(
   onQuestion?: (q: ChatQuestion) => void,
   onHeartbeat?: (note: string) => void,
   thinking?: ThinkingLevel,
+  sharedTurn?: SharedTurn,
+  onSubmitted?: () => void,
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -719,7 +728,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, thinking }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId: agentSessionId(sessionId), turnId, attachments, thinking, ...sharedTurn }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
@@ -729,6 +738,7 @@ export function streamChat(
           onRecoveryUnavailable();
           return;
         }
+        if (res.ok) onSubmitted?.();
         if (await consume(res)) return;
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return;
@@ -756,7 +766,7 @@ export function streamChat(
 /** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
 export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; turn_id?: string }> {
   const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
-  return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
+  return request(`/api/chat/last/${encodeURIComponent(agentSessionId(sessionId))}${query}`);
 }
 
 // ═══ 设置面板 · 环境安装（install_tool 引擎桥） ═══
@@ -976,5 +986,5 @@ export interface ChatModelStatus {
   supportsThinking?: boolean;
 }
 export function fetchChatModel(sessionId: string): Promise<ChatModelStatus> {
-  return request(`/api/chat/model?sessionId=${encodeURIComponent(sessionId)}`);
+  return request(`/api/chat/model?sessionId=${encodeURIComponent(agentSessionId(sessionId))}`);
 }
