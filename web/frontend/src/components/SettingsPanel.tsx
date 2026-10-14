@@ -1,3 +1,4 @@
+import ProviderRow from './ProviderRow';
 import ThinkingSelect from './ThinkingSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -447,7 +448,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
               : undefined);
           const isCustom = r.slot === 'custom';
           return (
-            <div className="prow" key={i}>
+            <ProviderRow key={i}>
               <span className={`step${r.order === 0 ? ' ghost' : ''}`}>{isCustom ? i + 1 : r.order}</span>
               {isCustom ? (
                 <span className="pname">
@@ -647,7 +648,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
               ) : (
                 <span />
               )}
-            </div>
+            </ProviderRow>
           );
         })}
         {additionalRows}

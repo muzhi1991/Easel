@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from './lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
+import ResponsiveShell from './components/ResponsiveShell';
 import type { Page } from './components/Sidebar';
 import ChatPage from './components/ChatPage';
 import SkillPage from './components/SkillPage';
@@ -804,34 +805,36 @@ export default function App() {
   }, [activeSessionId, currentPage]);
 
   return (
-    <div className="app-layout">
-      <Sidebar
+    <>
+      <ResponsiveShell
+        title={{dashboard: '工作台', chat: '对话', skills: '技能库', outputs: '内容库', accounts: '账号', profile: '画像', trends: '热点雷达', ideas: '选题库', calendar: '内容日历', publish: '发布中心', breakdown: '爆款拆解'}[currentPage]}
+        persona={selectedPersona || '通用模式'} onNewChat={handleNewChat}
+        navigation={(close) => <Sidebar
         currentPage={currentPage}
-        onPageChange={setCurrentPage}
+        onPageChange={(page) => { setCurrentPage(page); close(); }}
         personas={personas}
         selectedPersona={selectedPersona}
-        onPersonaChange={handlePersonaChange}
-        onNewProfile={() => setShowWizard(true)}
+        onPersonaChange={(persona) => { handlePersonaChange(persona); close(); }}
+        onNewProfile={() => { setShowWizard(true); close(); }}
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onSessionSelect={handleSessionSelect}
+        onSessionSelect={(id) => { handleSessionSelect(id); close(); }}
         onSessionDelete={handleSessionDelete}
         onSessionRename={handleSessionRename}
         onSessionArchive={handleSessionArchive}
-        onNewChat={handleNewChat}
+        onNewChat={() => { handleNewChat(); close(); }}
         gatewayStatus={gatewayStatus}
         apiDirect={apiDirect}
         agentRuntime={agentRuntime}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
-      <main className="main-content">
+        onOpenSettings={() => { setSettingsOpen(true); close(); }}
+      />}>
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}
         <div className="page-host">
           {renderPage()}
         </div>
-      </main>
+      </ResponsiveShell>
 
       {/* 首次使用：推荐配置画像 */}
       {showRecommend && (
@@ -873,6 +876,6 @@ export default function App() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }

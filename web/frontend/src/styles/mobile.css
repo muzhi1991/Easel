@@ -1,0 +1,160 @@
+/* Desktop keeps the original DOM layout. Mobile-only affordances stay hidden. */
+.navigation-shell, .provider-cell { display: contents; }
+.mobile-header, .mobile-nav-close, .mobile-field-label { display: none; }
+
+@media (max-width: 767px), (max-width: 1023px) and (pointer: coarse) {
+  .app-layout {
+    height: var(--app-height, 100dvh);
+    flex-direction: column;
+    padding-top: env(safe-area-inset-top);
+  }
+  .mobile-header {
+    display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+    padding: 7px max(12px, env(safe-area-inset-right)) 7px max(12px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .mobile-icon-button {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px;
+    width: 44px; height: 44px; border: 0; border-radius: 10px;
+    background: transparent; color: var(--text); cursor: pointer; font-size: 26px;
+  }
+  .mobile-icon-button:hover { background: var(--surface-hover); }
+  .mobile-icon-button:focus-visible { outline: 2px solid var(--accent-start); outline-offset: -2px; }
+  .mobile-header-context { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.45; }
+  .mobile-header-context strong { font-size: 15px; font-weight: 650; }
+  .mobile-header-context span { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .navigation-shell {
+    display: block; position: fixed; inset: 0 auto 0 0; z-index: 51;
+    width: min(320px, calc(100vw - 48px)); height: var(--app-height, 100dvh);
+    background: var(--sidebar-bg, var(--surface)); visibility: hidden; transform: translateX(-100%);
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+  }
+  .navigation-shell.is-open { visibility: visible; transform: none; box-shadow: var(--shadow-lg); }
+  .navigation-shell .sidebar { width: 100%; min-width: 0; }
+  .mobile-nav-backdrop { position: fixed; inset: 0; z-index: 50; border: 0; background: rgba(18,22,35,.4); }
+  .mobile-nav-close { display: flex; position: absolute; top: calc(9px + env(safe-area-inset-top)); right: 8px; z-index: 1; }
+  .sidebar-logo { padding-right: 38px; }
+  .sidebar .nav-item, .persona-select, .sidebar .new-chat-btn { min-height: 44px; }
+  .session-item { min-height: 44px; }
+  .session-actions { opacity: 1; }
+  .session-act { min-width: 30px; min-height: 36px; }
+  .main-content { height: auto; min-height: 0; width: 100%; }
+  .page-scroll, .gallery-page, .accounts-page, .profile-page, .skills-page {
+    padding: 20px 16px calc(28px + env(safe-area-inset-bottom)); width: 100%;
+  }
+  .page-title { font-size: 22px; flex-wrap: wrap; gap: 6px; overflow-wrap: anywhere; }
+  .page-head, .profile-head, .gallery-head { flex-wrap: wrap; }
+  .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .dash-grid, .skill-grid, .accounts-grid, .trend-grid, .kanban { grid-template-columns: minmax(0, 1fr); }
+  .dash-card-wide { grid-column: auto; }
+  .dash-card, .card { min-width: 0; }
+  .dash-quick { gap: 8px; }
+  .dash-quick-btn { flex: 1 1 140px; justify-content: center; min-height: 44px; }
+  .idea-card-actions { display: flex; }
+  .trend-save { opacity: 1; }
+  .publish-page { display: block; overflow-y: auto; }
+  .publish-editor, .publish-previews { width: 100%; min-width: 0; max-width: none; overflow: visible; padding: 20px 16px; }
+  .publish-editor { border-right: 0; border-bottom: 1px solid var(--border); }
+  .publish-previews { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+  .gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .gallery-head .page-title { font-size: 20px; }
+  .subnav { overflow-x: auto; flex-wrap: nowrap; flex-shrink: 0; }
+  .subnav > * { flex-shrink: 0; }
+
+  .chat-page { min-height: 0; }
+  .chat-hero { justify-content: flex-start; overflow-y: auto; gap: 16px; padding: 26px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .chat-hero > * { flex-shrink: 0; }
+  .chat-hero-title { font-size: 27px; letter-spacing: -.6px; }
+  .chat-hero-sub { font-size: 13px; }
+  .chat-messages { padding: 18px 14px 8px; overscroll-behavior-y: contain; }
+  .chat-input-area { padding: 8px 10px max(10px, env(safe-area-inset-bottom)); flex-shrink: 0; }
+  .composer { padding: 10px; border-radius: 16px; }
+  .composer-bar { gap: 6px; }
+  .composer-bar > .composer-attach-btn { width: 36px; min-height: 40px; padding: 6px; justify-content: center; }
+  .composer-attach-btn > span { display: none; }
+  .send-btn { min-width: 40px; min-height: 40px; }
+  .chat-model-controls { flex: 1; max-width: calc(100% - 88px); padding-left: 7px; }
+  .chat-current-model { flex: 1; padding-right: 6px; gap: 5px; }
+  .chat-model-controls > .thinking-control { padding-left: 6px; }
+  .reasoning-trigger { min-height: 38px; }
+  .reasoning-menu { max-height: calc(var(--app-height, 100dvh) - 16px); overflow-y: auto; }
+  .reasoning-menu button { height: 40px; }
+  .composer-hint { display: none; }
+  .message-bubble { overflow-wrap: anywhere; }
+  .message-bubble.assistant table { display: block; overflow-x: auto; }
+  .message-bubble.assistant pre { max-width: 100%; }
+  .msg-actions { opacity: 1; }
+  .msg-action { min-height: 36px; }
+  .msg-edit { width: 100%; }
+
+  .drawer { width: 100%; max-width: 100%; height: var(--app-height, 100dvh); }
+  .drawer-header { padding: max(16px, env(safe-area-inset-top)) 16px 16px; overflow-wrap: anywhere; }
+  .drawer-body { padding: 16px 16px calc(32px + env(safe-area-inset-bottom)); }
+  .drawer .icon-btn { min-width: 44px; min-height: 44px; flex-shrink: 0; }
+  .overlay { padding: 12px; }
+  .modal { max-width: 100%; max-height: calc(var(--app-height, 100dvh) - 24px); overflow-y: auto; }
+  .settings-overlay { align-items: flex-start; height: var(--app-height, 100dvh); }
+  .settings-panel { width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; padding-top: env(safe-area-inset-top); }
+  .settings-head { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+  .settings-head > div:first-child { flex: 1; }
+  .settings-sub { display: none; }
+  .settings-actions { gap: 6px; }
+  .settings-actions .btn { min-height: 38px; padding: 6px 9px; }
+  .settings-close { width: 40px; height: 40px; }
+  .settings-body { flex-direction: column; min-height: 0; }
+  .settings-overlay .settings-nav { width: 100%; flex-direction: row; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .settings-overlay .snav { flex: 1; justify-content: center; padding: 10px 7px; gap: 6px; }
+  .settings-overlay .snav small { display: none; }
+  .settings-overlay .settings-main { padding: 12px 14px 24px; min-height: 0; overflow-x: hidden; }
+  .settings-overlay .tabbar { overflow-x: auto; }
+  .settings-overlay .tab { min-height: 44px; flex-shrink: 0; }
+  .settings-overlay .panel-top, .settings-overlay .la-head { flex-wrap: wrap; }
+  .settings-overlay .panel-top strong { font-size: 14px; }
+  .settings-overlay .settings-field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .settings-overlay .settings-field-label { padding-top: 0; }
+  .settings-overlay .settings-field-body { max-width: none; }
+  .settings-overlay .board { border: 0; box-shadow: none; background: transparent; overflow: visible; }
+  .settings-overlay .prow.head { display: none; }
+  .settings-overlay .prow, .settings-overlay .media-provider-board .prow {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+    padding: 14px; margin-bottom: 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; align-items: start;
+  }
+  .settings-overlay .provider-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; grid-column: 1 / -1; }
+  .mobile-field-label { display: block; font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+  .settings-overlay .provider-cell-0 { display: none; }
+  .settings-overlay .provider-cell-1 { grid-column: 1; grid-row: 1; }
+  .settings-overlay .provider-cell-6 { grid-column: 2; grid-row: 1; align-self: center; }
+  .provider-cell-1 .mobile-field-label, .provider-cell-6 .mobile-field-label { display: none; }
+  .settings-overlay .provider-cell-8:has(> span:last-child:empty) { display: none; }
+  .settings-overlay .cell-text { white-space: normal; overflow-wrap: anywhere; }
+  .settings-overlay .model-cell { width: 100%; }
+  .settings-overlay .mock, .settings-overlay .proto-trigger { min-height: 42px; }
+  .settings-overlay .tag { align-self: flex-start; min-height: 32px; display: inline-flex; align-items: center; }
+  .settings-overlay .la-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 14px; }
+  .settings-overlay .la-name, .settings-overlay .la-act, .settings-overlay .la-hint { flex: auto; min-width: 0; }
+  .settings-overlay .la-act, .settings-overlay .la-hint { grid-column: 1 / -1; }
+  .settings-overlay .la-model { flex: 1; max-width: none; min-width: 0; }
+  .settings-overlay .grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-overlay .media-provider-form { grid-template-columns: minmax(0, 1fr) !important; }
+  .media-provider-form input, .media-provider-form select { min-width: 0; max-width: 100%; }
+  .settings-overlay form > div:last-child { flex-wrap: wrap; }
+  .settings-foot { padding: 10px 14px max(10px, env(safe-area-inset-bottom)); font-size: 11px; }
+  input:not([type=checkbox]):not([type=radio]), textarea, select,
+  .chat-input, .settings-overlay input.mock, .settings-overlay select { font-size: 16px; }
+  .cal-grid-head, .cal-grid { gap: 3px; }
+  .cal-cell { padding: 4px; min-height: 80px; }
+  .cal-nav { flex-wrap: wrap; }
+}
+
+@media (max-width: 359px) {
+  .gallery-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-head > div:first-child { flex-basis: 100%; }
+  .settings-actions { width: 100%; }
+  .settings-close { margin-left: auto; }
+}
+
+@media (max-width: 767px) and (prefers-reduced-motion: reduce),
+       (max-width: 1023px) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
+  .app-layout *, .settings-overlay *, .drawer-overlay * { animation: none; transition: none; scroll-behavior: auto; }
+}
