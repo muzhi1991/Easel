@@ -18,7 +18,7 @@ def catalog(tmp_path, monkeypatch):
     oc = tmp_path / 'openclaw.json'
     monkeypatch.setattr(web, '_oc_config_path', lambda: oc)
     env = tmp_path / '.env'
-    env.write_text('OPENAI_BASE_URL=https://example.test/v1\nOPENAI_API_KEY=test-only\nOPENAI_MODEL=glm-5.3\n')
+    env.write_text('EASEL_CHAT_TRANSPORT=http\nOPENAI_BASE_URL=https://example.test/v1\nOPENAI_API_KEY=test-only\nOPENAI_MODEL=glm-5.3\n')
     monkeypatch.setattr(web, 'ENV_FILE', env)
     models = [
         {'id': 'glm-5.3', 'name': 'glm-5.3', 'input': ['text'], 'reasoning': True},

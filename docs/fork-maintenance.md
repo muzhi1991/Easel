@@ -68,7 +68,7 @@ git merge --no-ff upstream/main
 - 遵循 [CONTRIBUTING.md](../CONTRIBUTING.md) 的必跑检查，以及本次改动需要的专项验证。
 - Python 使用当前 Easel `.venv`；适配包需要时重新安装，前端修改后执行 `web/frontend` 的 `npm run build`。
 - Web 修改按需要通过 `start-web-lan.sh` 重启并核查 localhost/LAN；无需因切换到相同代码的新分支重启服务。
-- Agent 技能仅同步本次有关的文件；完整 `openclaw/sync.sh` 会改 workspace 文件及清空 MEMORY.md，不随普通更新执行。
+- Agent 技能仅同步本次有关的文件；完整 `agents/sync.sh` 会改 workspace 文件及清空 MEMORY.md，不随普通更新执行。
 - `.env`、密钥、用户目录媒体配置及 OpenClaw 实例配置不进 Git。远程 Qwen 网关/模型服务独立部署，不随 Easel 分支合并升级。
 - 可以为已验证的部署提交打 tag，记录部署提交和验证证据，方便明确回退目标。回退既有公共 `dev` 修改优先使用 revert，避免强推改写运行历史。
 - 每次修改后提交到相应分支，推自己的 fork；`main` 保持官方原样。

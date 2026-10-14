@@ -228,7 +228,7 @@ def load_module(name, relative):
 
 
 def test_pipeline_existing_subtitles_precede_any_provider(tmp_path, monkeypatch):
-    pipeline = load_module("media_pipeline", "skills/openclaw/video-production/vendor/video-pipeline-sdk/pipeline/run.py")
+    pipeline = load_module("media_pipeline", "skills/builtin/video-production/vendor/video-pipeline-sdk/pipeline/run.py")
     source = tmp_path / "existing.json"; source.write_text('{"segments": []}')
     monkeypatch.setattr(pipeline, "run_cmd", lambda *a, **kw: pytest.fail("must not invoke ASR"))
     status, _ = pipeline.st_transcribe({"rd": tmp_path, "state": {"config": {"transcript": str(source)}}})
@@ -236,7 +236,7 @@ def test_pipeline_existing_subtitles_precede_any_provider(tmp_path, monkeypatch)
 
 
 def test_pipeline_provider_failure_does_not_run_whisper(tmp_path, monkeypatch):
-    pipeline = load_module("media_pipeline_failed", "skills/openclaw/video-production/vendor/video-pipeline-sdk/pipeline/run.py")
+    pipeline = load_module("media_pipeline_failed", "skills/builtin/video-production/vendor/video-pipeline-sdk/pipeline/run.py")
     calls = []
     def run(argv, **kwargs):
         calls.append(argv); return 1, "service busy"

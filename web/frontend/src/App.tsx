@@ -53,6 +53,7 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [apiDirect, setApiDirect] = useState(false);
+  const [agentRuntime, setAgentRuntime] = useState('openclaw');
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -175,6 +176,7 @@ export default function App() {
         setPersonas(data.personas || []);
         setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
         setApiDirect(data.transport === 'api');
+        setAgentRuntime(data.runtime || 'openclaw');
         const unconfigured = !!boot && boot.modelConfigured === false;
         if (unconfigured) {
           // 直接打开设置面板（它默认就停在「模型配置 · 对话」页）
@@ -715,6 +717,7 @@ export default function App() {
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             apiDirect={apiDirect}
+            agentRuntime={agentRuntime}
             onNavigate={(page) => page === 'chat' ? handleNewChat() : setCurrentPage(page)}
             onUseTopic={handleUseTopic}
           />
@@ -818,6 +821,7 @@ export default function App() {
         onNewChat={handleNewChat}
         gatewayStatus={gatewayStatus}
         apiDirect={apiDirect}
+        agentRuntime={agentRuntime}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main-content">
@@ -863,6 +867,7 @@ export default function App() {
             setNeedModelSetup(false);
             void fetchStatus().then((data) => {
               setApiDirect(data.transport === 'api');
+              setAgentRuntime(data.runtime || 'openclaw');
               setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
             }).catch(() => setGatewayStatus('disconnected'));
           }}
