@@ -326,7 +326,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled }: OutputsPageProp
                 <div className="skill-detail-title" style={{ fontSize: 16 }}>{selected.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3, fontFamily: "'SF Mono','Consolas',monospace" }}>{selected.path}</div>
               </div>
-              <button className="icon-btn" onClick={() => setSelected(null)}>×</button>
+              <button className="icon-btn" aria-label="关闭预览" onClick={() => setSelected(null)}>×</button>
             </div>
             <div className="drawer-body">{preview()}</div>
             <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>

@@ -18,9 +18,10 @@ export default function ReasoningMenu({ value, disabled, label, title, onChange 
   const open = () => {
     if (disabled || !trigger.current) return;
     const rect = trigger.current.getBoundingClientRect();
-    const height = 168;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const height = Math.min(window.matchMedia('(max-width: 767px), (max-width: 1023px) and (pointer: coarse)').matches ? 212 : 168, viewportHeight - 16);
     setPosition({ left: Math.max(8, Math.min(rect.right - 116, window.innerWidth - 124)),
-      top: rect.top >= height + 8 ? rect.top - height - 6 : rect.bottom + 6 });
+      top: Math.max(8, Math.min(rect.top >= height + 8 ? rect.top - height - 6 : rect.bottom + 6, viewportHeight - height - 8)) });
   };
   const close = (focus = false) => {
     setPosition(undefined);

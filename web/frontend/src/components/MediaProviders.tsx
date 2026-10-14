@@ -1,3 +1,4 @@
+import ProviderRow from './ProviderRow';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { deleteMediaProvider, fetchMediaProviders, probeMediaProvider, saveMediaProvider } from '../lib/api';
@@ -54,7 +55,7 @@ export default function MediaProviders({ channel, builtInRows = [], builtInBoard
           const isDefault = config?.defaults[channel] === provider.id;
           const adapter = adapters.find((a) => a.id === provider.adapter);
           const urls = Object.entries(provider.settings).filter(([key]) => key.endsWith('_url'));
-          return <div className="prow" key={provider.id}>
+          return <ProviderRow key={provider.id}>
             <span className="step">{index + 1}</span>
             <span className="pname">{provider.name}</span>
             <span className="cell-text" title={adapter?.name}>{adapter?.name || provider.adapter}</span>
@@ -74,7 +75,7 @@ export default function MediaProviders({ channel, builtInRows = [], builtInBoard
               {!isDefault && <button className="btn btn-sm" disabled={busy}
                 onClick={() => void act(() => deleteMediaProvider(provider.id))}>删除</button>}
             </span>
-          </div>;
+          </ProviderRow>;
         });
   // Other channels can use this same UI when their first execution adapter is installed.
   if (!adapters.length && config && !builtInRows.length && !builtInBoard) return null;
@@ -91,18 +92,18 @@ export default function MediaProviders({ channel, builtInRows = [], builtInBoard
           <span>顺序</span><span>供应商</span><span>类型</span><span>模型</span>
           <span>Base URL</span><span>API Key</span><span>角色</span><span>连接状态</span><span>操作</span>
         </div>
-        {builtInRows.map((row, index) => <div className="prow" key={`builtin-${index}`}>
+        {builtInRows.map((row, index) => <ProviderRow key={`builtin-${index}`}>
           <span className="step ghost">{row.order || '—'}</span>
           <span className="pname">{row.name}<small>{row.sub}</small></span>
           <span>{row.type}</span><span className="cell-text">{row.model || '—'}</span>
           <span className="cell-text">{row.baseUrl || '—'}</span><span>{row.keyMasked || '—'}</span>
           <span className="tag main">优先</span><span>{row.result || '—'}</span><span />
-        </div>)}
+        </ProviderRow>)}
         {providerRows}
       </div>}
       {config && !providers.length && <div className="foot-note">尚未配置此通道的自定义供应商。</div>}
       {draft && <form onSubmit={(e) => { e.preventDefault(); void act(() => saveMediaProvider(draft)); }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) minmax(160px, 2fr)', gap: 10, padding: '16px 0' }}>
+        <div className="media-provider-form" style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 1fr) minmax(160px, 2fr)', gap: 10, padding: '16px 0' }}>
           <label htmlFor="media-adapter">接口类型</label>
           <select id="media-adapter" value={draft.adapter} disabled={editing || busy}
             onChange={(e) => setDraft(newDraft(e.target.value))}>

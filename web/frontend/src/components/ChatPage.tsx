@@ -157,7 +157,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           rows={1}
-          autoFocus={hero}
+          autoFocus={hero && !window.matchMedia('(max-width: 767px), (max-width: 1023px) and (pointer: coarse)').matches}
         />
       </div>
       <input ref={fileInputRef} type="file" multiple hidden
