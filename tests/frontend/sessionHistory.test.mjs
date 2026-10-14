@@ -49,3 +49,24 @@ test('legacy conversation history migrates rather than being deleted on first lo
   assert.equal(state.localStorage.getItem('easel_sessions'), JSON.stringify(original));
   assert.equal(state.localStorage.getItem(`${previous}_sessions`), null);
 });
+
+test('new chats are shared drafts and never enter legacy local storage', () => {
+  const original = [{ id: 'legacy', messages: [{ role: 'assistant', content: 'keep me' }], created: 1 }];
+  const state = load({ easel_sessions: JSON.stringify(original) });
+  const shared = state.exports.createSession('画像');
+  assert.equal(shared.source, 'server');
+  assert.match(shared.id, /^shared_/);
+  state.exports.saveSessions([shared, ...state.exports.loadSessions()]);
+  assert.equal(state.localStorage.getItem('easel_sessions'), JSON.stringify(original));
+});
+
+test('only explicitly imported local records are hidden, and their backup survives server deletion', () => {
+  const records = ['imported', 'local'].map(id => ({ id, messages: [{ role: 'assistant', content: id }], created: 1 }));
+  const state = load({ easel_sessions: JSON.stringify(records), easel_shared_imported_ids: '["imported"]' });
+  assert.equal(state.exports.loadSessions().length, 1);
+  assert.equal(state.exports.loadSessions()[0].id, 'local');
+  state.exports.saveSessions(state.exports.loadSessions());
+  assert.equal(JSON.parse(state.localStorage.getItem('easel_sessions')).length, 2);
+  const otherBrowser = load({ easel_sessions: JSON.stringify(records) });
+  assert.equal(otherBrowser.exports.loadSessions().length, 2);
+});

@@ -10,6 +10,9 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  source?: 'server';
+  revision?: number;
+  agentSessionId?: string;
   thinking?: ThinkingLevel;
   id: string;
   title: string;
@@ -71,7 +74,7 @@ export function savePublishDraft(d: PublishDraft): void {
 
 const STORAGE_KEY = 'easel_sessions';
 const ACTIVE_KEY = 'easel_active_session';
-const MAX_SESSIONS = 100;
+export const MIGRATED_KEY = 'easel_shared_imported_ids';
 const TITLE_MAX_CHARS = 24;
 
 /** 上次活跃会话 id：重开网页时据此续接上次对话（而不是丢进新空会话）。 */
@@ -96,7 +99,8 @@ export function loadSessions(): ChatSession[] {
     const sessions = (JSON.parse(raw) as ChatSession[]).filter((s) => s && typeof s === 'object' && s.id);
     // 兼容旧版本：附件内部指令曾被直接存进用户消息，加载时拆出并隐藏。
     // 防御：损坏/缺字段的会话（旧版写入或写中断）恢复成可用形态，绝不让渲染期崩。
-    return sessions.map((session) => ({
+    const migrated = new Set<string>(JSON.parse(localStorage.getItem(MIGRATED_KEY) || '[]'));
+    return sessions.filter((session) => !migrated.has(session.id)).map((session) => ({
       ...session,
       messages: Array.isArray(session.messages)
         ? session.messages.map((message) => {
@@ -117,25 +121,23 @@ export function loadSessions(): ChatSession[] {
   }
 }
 
-/** 保存前清理：只保留最新 1 个空会话（避免空会话无限堆积），并封顶总数。 */
-function prune(sessions: ChatSession[]): ChatSession[] {
-  let keptEmpty = false;
-  const pruned = sessions.filter((s) => {
-    if (s.messages.length > 0) return true;
-    if (keptEmpty) return false;
-    keptEmpty = true;
-    return true;
-  });
-  return pruned.slice(0, MAX_SESSIONS);
-}
-
+/** Only old local records are written here. Shared messages are owned by the server. */
 export function saveSessions(sessions: ChatSession[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prune(sessions)));
+  const migrated = new Set<string>(JSON.parse(localStorage.getItem(MIGRATED_KEY) || '[]'));
+  const original = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as ChatSession[];
+  // Keep imported originals as a local backup; deletion on the server must not revive them.
+  const retained = original.filter((s) => migrated.has(s.id));
+  const next = JSON.stringify([
+    ...retained, ...sessions.filter((s) => s.source !== 'server' && !migrated.has(s.id)),
+  ]);
+  if (next !== localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, next);
 }
 
 export function createSession(persona?: string): ChatSession {
   return {
-    id: generateId(),
+    id: `shared_${generateId()}`,
+    source: 'server',
+    revision: 0,
     title: 'New Chat',
     messages: [],
     persona,

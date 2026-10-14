@@ -13,7 +13,7 @@ interface ChatPageProps {
   session: ChatSession;
   onThinkingChange: (level?: ThinkingLevel) => void;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
-  onSend: (displayText: string, attachments?: UploadedFile[]) => void;
+  onSend: (displayText: string, attachments?: UploadedFile[]) => Promise<boolean>;
   onStop: () => void;
   onResend: (
     userIndex: number,
@@ -40,6 +40,7 @@ function greeting(): string {
 
 export default function ChatPage({ apiDirect, session, stream, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
   const [input, setInput] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -108,13 +109,18 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
     }
   }, [input]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming || uploading) return;
+    if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
-    onSend(trimmed, attachments);
-    setInput('');
-    setAttachments([]);
+    setSubmitting(true);
+    try {
+      if (await onSend(trimmed, attachments)) {
+        setInput((current) => current.trim() === trimmed ? '' : current);
+        const sent = new Set(attachments.map((a) => a.path));
+        setAttachments((current) => current.filter((a) => !sent.has(a.path)));
+      }
+    } finally { setSubmitting(false); }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -171,7 +177,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
         {isStreaming ? (
           <button className="send-btn" onClick={onStop} title="停止生成"><IconStop size={15} /></button>
         ) : (
-          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading} title="发送"><IconArrowUp size={17} /></button>
+          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || submitting} title="发送"><IconArrowUp size={17} /></button>
         )}
       </div>
       <div className="composer-hint">{isStreaming ? '生成中…' : 'Enter 发送 · Shift+Enter 换行'}</div>
