@@ -352,6 +352,15 @@ class GatewayClient:
         return next((row for row in payload.get("sessions", [])
                      if row.get("key") == session_key), None)
 
+    def chat_history(self, session_key: str) -> dict:
+        """Read recent display history with explicit media directives intact.
+
+        The default 8k text cap can hide MEDIA directives near the end of a reply.
+        Keep the query bounded while allowing a full long final assistant message.
+        """
+        return self._rpc("chat.history", {"sessionKey": session_key, "limit": 10,
+                                          "maxChars": 500000, "maxBytes": 4000000}) or {}
+
     def set_thinking(self, session_key: str, level: str) -> dict:
         """Apply a per-session override before the HTTP agent turn starts."""
         return self._rpc("sessions.patch", {"key": session_key, "thinkingLevel": level}) or {}

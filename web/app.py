@@ -48,9 +48,10 @@ from easel.gateway_endpoint import chat_completions_url, healthz_url, port_sourc
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import (load_profile_text, persona_prefix, chat_turn_message,
                            profile_exists, valid_persona_name, _FILE_ORDER)
-from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
+from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE, TIMEOUT_CHAT_MEDIA
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, api_config, api_mode,
                               history_path, read_settings, stream_chat)
+from easel.chat_media import media_suffix
 from easel.conversations import Conversations, Conflict as ConversationConflict, Missing as ConversationMissing
 from easel import harnesses
 from easel.harnesses import store as harness_store
@@ -3450,6 +3451,18 @@ async def api_chat_job_stream(turn_id: str, after: int = 0):
     })
 
 
+def _recover_chat_media(session_id: str, run_id: str, delivered: str) -> str:
+    if GatewayClient is None:
+        raise RuntimeError("网关会话接口不可用")
+    client = GatewayClient(timeout=TIMEOUT_CHAT_MEDIA)
+    try:
+        session_key = f"agent:main:{session_id}"
+        history = client.chat_history(session_key)
+        return media_suffix(history, session_key, run_id, OUTPUTS_DIR, delivered)
+    finally:
+        client.close()
+
+
 @app.post("/api/chat/stream")
 async def api_chat_stream(req: ChatRequest):
     """SSE 真流式对话。
@@ -3614,6 +3627,14 @@ async def api_chat_stream(req: ChatRequest):
                                 run_info["http_error"] = True
                                 to_client("error", f"❌ 网关返回错误：{str(d['error'])[:160]}")
                                 return
+                            # This wire ID is the same __openclaw.runId exposed by chat.history.
+                            # Keep it separate from diagnostic raw-stream run IDs.
+                            wire_id = d.get("id")
+                            if isinstance(wire_id, str) and wire_id.startswith("chatcmpl_"):
+                                if run_info.get("gateway_run_id") not in (None, wire_id):
+                                    run_info["gateway_run_conflict"] = True
+                                else:
+                                    run_info["gateway_run_id"] = wire_id
                             choice = (d.get("choices") or [{}])[0]
                             if choice.get("finish_reason") is not None:
                                 run_info["stop_reason"] = choice["finish_reason"]
@@ -4051,9 +4072,23 @@ async def api_chat_stream(req: ChatRequest):
                     }, ensure_ascii=False) + "\n")
             except Exception:
                 pass
+            # The gateway removes MEDIA lines from delta.content. Recover only this
+            # run's explicit directives before persisting or sending done, still under
+            # the session lock. Forward/replay/shared storage all receive the same suffix.
+            if is_http and run_info.get("gateway_run_id") and not run_info.get("gateway_run_conflict"):
+                try:
+                    media = await asyncio.to_thread(_recover_chat_media, sk,
+                                                    run_info["gateway_run_id"], "".join(full_text))
+                except Exception as exc:
+                    print(f"[chat-media] recovery failed: {type(exc).__name__}", file=sys.stderr)
+                    media = "\n\n（本轮附件检查未完成，可在内容库查看产物。）"
+                if media:
+                    full_text.append(media)
+                    to_client("token", media)
             # 落盘完整结果：后端跑完整轮不依赖客户端连接，断线后前端用 /api/chat/last 取回
             _save_turn(pk, "done", "".join(full_text), {
                 "turn_id": turn_id,
+                "gateway_run_id": run_info.get("gateway_run_id"),
                 "clean_end": clean_end,
                 "stop_reason": "user_stopped" if user_stopped else run_info.get("stop_reason"),
             })
