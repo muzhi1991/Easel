@@ -12,6 +12,7 @@ from easel.gateway_questions import GatewayClient
 
 @pytest.fixture()
 def model_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, '_harness_settings', lambda: {'runtime': 'openclaw'})
     path = tmp_path / 'openclaw.json'
     path.write_text(json.dumps({'agents': {'defaults': {'model': {'primary': 'easel-openai/glm-5.3-flash'}}}}))
     monkeypatch.setattr(web, '_oc_config_path', lambda: path)
@@ -73,3 +74,12 @@ def test_rpc_only_reads_and_matches_exact_session():
 def test_invalid_session_id_rejected():
     with pytest.raises(web.HTTPException):
         web.api_chat_model('../another-session')
+
+
+def test_native_harness_status_does_not_read_openclaw(monkeypatch):
+    monkeypatch.setattr(web, '_harness_settings',
+                        lambda: {'runtime': 'codex', 'models': {'codex': 'native-model'}})
+    monkeypatch.setattr(web, '_oc_config_path', lambda: pytest.fail('must not read OpenClaw'))
+    assert web.api_chat_model('native-session') == {
+        'model': 'native-model', 'modelRef': 'native-model',
+        'source': 'configured', 'supportsThinking': False}

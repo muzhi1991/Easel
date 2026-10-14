@@ -39,6 +39,7 @@ export default function ChatModelControls({ sessionId, streaming, thinking, onTh
   const uncertain = failed || status?.source === 'unavailable';
   const title = failed ? '模型读取失败，请检查网关连接' : status?.source === 'unavailable'
     ? `网关暂不可用，显示配置中的主模型：${status.modelRef}`
+    : status?.source === 'configured' ? `底座配置模型：${status.model}；实际模型由原生会话决定`
     : status?.modelRef ? `当前模型：${status.modelRef}；可在设置中切换` : '正在读取当前模型';
   return <div className="chat-model-controls" role="group" aria-label="模型与推理">
     <div className={`chat-current-model${uncertain ? ' is-uncertain' : ''}`} title={title}>
@@ -46,6 +47,6 @@ export default function ChatModelControls({ sessionId, streaming, thinking, onTh
       <span className="chat-model-name">{status?.model || (failed ? '模型不可用' : '读取模型…')}</span>
       {status?.source === 'unavailable' && <span className="model-fallback-label">默认</span>}
     </div>
-    {!apiDirect && <ThinkingSelect value={thinking} onChange={onThinkingChange} disabled={streaming} />}
+    {!apiDirect && status?.supportsThinking !== false && <ThinkingSelect value={thinking} onChange={onThinkingChange} disabled={streaming} />}
   </div>;
 }

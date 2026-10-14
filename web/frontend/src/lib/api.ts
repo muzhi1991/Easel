@@ -50,8 +50,40 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export interface StatusResponse {
   gateway: boolean;
   transport?: string;
+  runtime?: string;
   skills: SkillItem[];
   personas: PersonaItem[];
+}
+
+export interface HarnessSettingsResponse {
+  runtime: string;
+  models: Record<string, string>;
+  sandbox: string;
+  codex_auto_approve: boolean;
+  locked: boolean;
+  agents: { id: string; label: string; protocol: string; installed: boolean; install_hint: string }[];
+}
+
+export function fetchHarnessSettings(): Promise<HarnessSettingsResponse> {
+  return request('/api/settings/harness');
+}
+
+export interface HarnessModel {
+  id: string;
+  label: string;
+  default: boolean;
+}
+
+export function fetchHarnessModels(runtime: string): Promise<{ runtime: string; models: HarnessModel[] }> {
+  return request(`/api/settings/harness/models/${encodeURIComponent(runtime)}`, { method: 'POST' });
+}
+
+export function saveHarnessSettings(runtime: string, model: string, sandbox: string, codexAutoApprove?: boolean): Promise<HarnessSettingsResponse> {
+  return request('/api/settings/harness', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runtime, model, sandbox, codex_auto_approve: codexAutoApprove }),
+  });
 }
 
 export interface PersonaItem {
@@ -305,6 +337,10 @@ export function fetchOutputs(): Promise<OutputNode[]> {
   return request<OutputNode[]>('/api/outputs');
 }
 
+export function fetchArtifactArchive(path: string, signal?: AbortSignal): Promise<{ paths: string[] }> {
+  return request<{ paths: string[] }>(`/api/artifacts/archive?path=${encodeURIComponent(path)}`, { signal });
+}
+
 export function fetchOutputContent(path: string): Promise<OutputContent> {
   return request<OutputContent>(`/api/output/${path.split('/').map(encodeURIComponent).join('/')}`);
 }
@@ -402,6 +438,7 @@ export interface LoginStart {
   state?: string;       // starting | qr_ready | success | expired | error | unknown
   message?: string;
   qr?: string;          // outputs 下相对路径，用 mediaUrl() 取图
+  qrTs?: number;
   configured?: boolean; // 凭证式：是否已配置
 }
 
@@ -437,7 +474,8 @@ export function startMpLogin(platform: string): Promise<LoginStatus> {
 
 /** 轮询公众号后台扫码登录状态。 */
 export function mpLoginStatus(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login/status`);
+  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login/status`,
+    { signal: AbortSignal.timeout(8000) });
 }
 
 export interface LoginStatus {
@@ -459,8 +497,8 @@ export interface AccountWhoami {
 }
 
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
-export function accountWhoami(platform: string): Promise<AccountWhoami> {
-  return request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami`);
+export function accountWhoami(platform: string, force = false): Promise<AccountWhoami> {
+  return request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`);
 }
 
 /** 退出登录：删该平台持久化登录态。 */
@@ -510,11 +548,12 @@ export function submitPublishSms(platform: string, code: string): Promise<{ ok: 
 }
 
 export function startLogin(platform: string): Promise<LoginStart> {
-  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}`, { method: 'POST' });
+  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}?restart=true`, { method: 'POST' });
 }
 
 export function loginStatus(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/login/${encodeURIComponent(platform)}/status`);
+  return request<LoginStatus>(`/api/login/${encodeURIComponent(platform)}/status`,
+    { signal: AbortSignal.timeout(8000) });
 }
 
 // ---- 归因层：账号创作数据 ----
@@ -533,11 +572,12 @@ export interface AccountAnalytics {
   likes: number | null;
   following: number | null;
   posts: number | null;
-  metrics: { label: string; value: string; vs: string }[];
+  metrics: { label: string; value: string | number; vs: string }[];
   notes: { title: string; url: string; cover?: string; stat?: string }[];
   growth: Record<'last' | 'day' | 'week' | 'month' | 'year',
     { followers: number | null; likes: number | null; posts: number | null; since_days: number | null } | null>;
   fetched_at: number;
+  warning?: string;
 }
 
 /** 支持抓数据的平台 + 各自登录态。 */
@@ -545,9 +585,10 @@ export function fetchAnalyticsPlatforms(): Promise<AnalyticsPlatform[]> {
   return request<AnalyticsPlatform[]>('/api/analytics/platforms');
 }
 
-/** 抓某平台已登录账号的创作数据（后端起 headless 浏览器，数秒）。 */
+/** 抓某平台已登录账号的创作数据，客户端等待时限略长于后端。 */
 export function fetchAccountAnalytics(platform: string): Promise<AccountAnalytics> {
-  return request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}`);
+  return request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}`,
+    { signal: AbortSignal.timeout(platform === 'wechat-oa' ? 195000 : 105000) });
 }
 
 /** 回填短信验证码（登录风控短信墙）：提交后 runner 读走填码继续登录。 */
@@ -841,8 +882,8 @@ export interface ModelChannelsResponse {
   primary: string;
 }
 
-export function fetchModelChannels(): Promise<ModelChannelsResponse> {
-  return request('/api/settings/models');
+export function fetchModelChannels(runtime?: string): Promise<ModelChannelsResponse> {
+  return request(`/api/settings/models${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ''}`);
 }
 
 export function saveChatTransport(transport: 'api' | 'openclaw'): Promise<ModelChannelsResponse> {
@@ -931,7 +972,8 @@ export function saveThinking(thinking: ThinkingLevel): Promise<{ thinking: Think
 export interface ChatModelStatus {
   model: string;
   modelRef: string;
-  source: 'session' | 'default' | 'unavailable';
+  source: 'session' | 'default' | 'unavailable' | 'configured';
+  supportsThinking?: boolean;
 }
 export function fetchChatModel(sessionId: string): Promise<ChatModelStatus> {
   return request(`/api/chat/model?sessionId=${encodeURIComponent(sessionId)}`);
