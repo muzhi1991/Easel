@@ -49,32 +49,22 @@ layer: produce
 
 ## 生图脚本调用（scripts/generate_image.py）
 
-直接生图走 apimart.ai 图像生成接口（模型由 `IMG_MODEL` 指定，model-agnostic，异步轮询）；也可改用统一生图入口 skill `ai-image-gen`。优先在 `.claude/skills/ecom-details-image/` 放 `.env`，不要把真实 API key 写进仓库：
+脚本是统一生图入口的薄封装，保留电商参数，不再自行选择模型、发送 HTTP、轮询或下载。执行前先切到运行时说明中的 Easel 项目根；读取 [ai-image-gen](../ai-image-gen/SKILL.md) 的配置与模型选择规则，查询 `.venv/bin/python -m easel.media providers`。不在技能目录放另一份 .env。
 
-```dotenv
-IMG_BASE_URL=https://api.apimart.ai/v1
-IMG_MODEL=gpt-image-2
-IMG_API_KEY=your-api-key
-```
-
-脚本兼容别名：`OPENAI_BASE_URL`、`OPENAI_API_BASE`、`OPENAI_IMAGE_MODEL`、`OPENAI_MODEL`、`OPENAI_API_KEY`。
-
-调用形状：
+默认使用设置页 image 默认实例（本部署 Flare）；显式 `--provider` 只影响本次任务。明确额度不足、用户要求对比、质量不满意或主动重跑时，遵守 ai-image-gen 的 Qwen/Sunburst 选择规则；失败不得自行循环重交。
 
 ```bash
-python3 skills/builtin/ecom-details-image/scripts/generate_image.py --prompt "..." --size 1:1 --resolution 2k
-python3 skills/builtin/ecom-details-image/scripts/generate_image.py --prompt-file prompt.txt --output-dir outputs
-python3 skills/builtin/ecom-details-image/scripts/generate_image.py --env-file .env --image product.jpg --prompt-file prompt.txt
+python3 skills/builtin/ecom-details-image/scripts/generate_image.py --prompt "陶瓷杯商品主图，米白背景" --size 1:1 --output-dir outputs/陶瓷杯商品图
+python3 skills/builtin/ecom-details-image/scripts/generate_image.py --prompt-file prompt.txt --output-dir outputs/陶瓷杯商品图
+python3 skills/builtin/ecom-details-image/scripts/generate_image.py --env-file .env --image product.jpg --prompt-file prompt.txt --output-dir outputs/陶瓷杯商品图
 ```
 
-参数：`--prompt` / `--prompt-file`；`--output-dir`（仅用户指定时用，否则 `generated-images/`）；`--size`（比例格式，14 种，如 `1:1`/`16:9`/`2:3`/`4:5`，默认 `1:1`）；`--resolution`（`1k`/`2k`/`4k`，默认 `2k`，4K 仅限 6 个宽幅比例）；`--image`（参考产品图路径，对保证产品外观准确非常有效）；`--poll-interval`（默认 `5`）；`--timeout`（默认 `180`）；`--format`（默认 `png`）。
-
-生图规则：
-
-1. 先输出最终 Prompt，再调脚本。短 Prompt 用 `--prompt`，长 Prompt 用 `--prompt-file`。
-2. 根据平台选 `--size`，没要求时默认 `1:1`。
-3. 缺少 `IMG_API_KEY` 等配置时**不要调用脚本**，只输出完整 Prompt 包 + 配置命令示例，说明需要在 `.env` 里配置什么，交给用户自行运行。
-4. 如果 API/模型不支持某尺寸，改用最接近的支持尺寸并说明。
+- 保留 `--prompt` / `--prompt-file`、`--output-dir`、`--image`、`--size`、`--n` 等旧参数；新增 `--provider`、`--mask`。输出默认 `outputs/电商商品图/`，实际任务应指定具体商品项目；每次调用生成唯一文件名，重跑保留旧图。
+- `--size` 支持像素及常见比例（1:1→1024x1024、3:2→1536x1024、2:3→1024x1536）；比例转换不代表所有模型都支持该尺寸。`--resolution` 只用于旧异步服务，不能把它当同步模型的画质设置。
+- `--timeout` 省略使用统一入口/实例默认；`--format` 默认 png，`--poll-interval` 仅旧异步接口使用。
+- 有商品参考图必须传 `--image`，走统一 img2img，不得丢掉参考图退回文生图。先核实实例 supports_edit；Qwen 当前仅文生图，不能用于要求保持商品外观的编辑或作为其额度后备。没有可用编辑实例时说明原因。
+- 先输出最终 Prompt，再调用；通过统一入口 `check` 核对配置，不再只凭 IMG_API_KEY 判断。模型拒绝参数就说明具体限制，不盲目重交。
+- 输出后检查商品外观、品牌文字和实际尺寸；参考图输入不保证精确还原。逐张提供 Markdown 图片引用并标注模型。
 
 ## QA 检查（输出前逐条确认）
 
