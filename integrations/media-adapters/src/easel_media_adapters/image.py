@@ -25,6 +25,7 @@ class OpenAIImageAdapter:
             {'key': 'base_url', 'label': 'Base URL（含 /v1）', 'type': 'url', 'required': True},
             {'key': 'model', 'label': '模型', 'type': 'text', 'required': True},
             {'key': 'supports_edit', 'label': '支持图片编辑', 'type': 'boolean', 'default': False},
+            {'key': 'edit_size_auto', 'label': '编辑时保留原图比例（size=auto）', 'type': 'boolean', 'default': False},
             {'key': 'api_key_env', 'label': '凭证环境变量（无鉴权留空）', 'type': 'secret_ref', 'default': ''},
             {'key': 'timeout_seconds', 'label': '生成超时（秒）', 'type': 'number', 'default': 1800, 'min': 1, 'max': 3600},
             {'key': 'transport', 'label': 'HTTP 传输', 'type': 'text', 'default': 'httpx', 'choices': ['httpx', 'curl']},
@@ -57,6 +58,8 @@ class OpenAIImageAdapter:
                 raise MediaError('生图超时需为 1–3600 秒')
             s['timeout_seconds'] = request.timeout
         payload = {'model': s['model'], 'prompt': request.prompt, 'size': request.size, 'n': request.n}
+        if request.image and s.get('edit_size_auto', False):
+            payload['size'] = 'auto'
         if request.quality:
             payload['quality'] = request.quality
         try:

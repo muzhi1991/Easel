@@ -30,7 +30,7 @@ layer: produce
 - Flare 返回明确额度耗尽标记 `IMAGE_QUOTA_EXHAUSTED` 时，可改用已配置的自部署 Qwen Image，并告知用户实际模型。普通429限流、超时、网络错误或提交状态未知不等于额度不足，不重交或自动切换。
 - 用户要求更多图片做对比时，可用同一需求同时调用 Flare 和自部署 Qwen；分别指定实例、输出文件名并标注模型。不因普通生图请求擅自生成多份。
 - 用户对质量不满意或明确要求重新生成，且未指定模型时，优先 GPT Image Sunburst；这是用户发起的新一轮生成，保留原图。传输故障后的恢复不属于质量重跑。
-- 通过查询结果的模型名匹配实例 ID，不假定固定 ID；所需模型未配置就说明。Qwen 当前仅文生图，不能把编辑任务悄悄改成文生图；对比时共同使用1024x1024、每次1张，Qwen 不传 quality。
+- 通过查询结果的模型名匹配实例 ID，不假定固定 ID；所需模型未配置就说明。Qwen 支持文生图及普通单图编辑；编辑前确认实例 supports_edit，不得丢掉参考图改成文生图。文生图对比使用1024x1024、每次1张；Qwen 不传 quality 或 mask，不用于多参考图任务。
 - 参数和能力以实例为准：`supports_edit=false` 不调用 img2img；模型名不能代替实际效果验证。失败不循环重试；Sunburst失败也不要自动再换一圈。
 
 没有 image 默认实例时沿用 `.env` 的 `IMG_BASE_URL`、`IMG_MODEL`、`IMG_API_KEY`。显式 `--provider legacy` 也可调用该旧配置；OpenAI 兼容走同步接口，apimart 走异步接口。
@@ -62,7 +62,7 @@ python skills/shared/scripts/ai_image.py text2img \
 - `--provider`：指定媒体实例；省略时使用 image 默认实例。
 - `--timeout`：同步生成请求或异步轮询超时秒；媒体实例使用自身配置（默认1800），旧配置默认180；不包含下载时间。慢速同步服务可显式传 `--timeout 1800`，超时先检查服务端状态，不自动重交。
 - 同步可加 `--quality low|medium|high`（仅限支持该参数的服务）；异步可加 `--resolution 1k|2k|4k`。
-- 若当前模型为 `qwen-image-2.1-uc-bf16`：接口仅支持文生图，使用 `--timeout 1800 --n 1`，尺寸限512/768/1024/1536/2048的正方形，默认1024x1024；不传 `--quality`，不调用下述 img2img/variations。服务繁忙429或超时不重复提交。
+- 若当前模型为 `qwen-image-2.1-uc-bf16`：使用 `--timeout 1800 --n 1`。文生图尺寸限512/768/1024/1536/2048的正方形，默认1024x1024。普通单图编辑使用 img2img，实例须开启 supports_edit 与 edit_size_auto；适配器发送 size=auto，保留原图比例、使用服务默认 resolution=1024，不承诺输出为指定像素尺寸。不传 `--quality`、`--mask`，不使用多参考图或 variations。服务繁忙429或超时不重复提交。
 
 ### 3. 图生图 / 图像编辑 img2img
 

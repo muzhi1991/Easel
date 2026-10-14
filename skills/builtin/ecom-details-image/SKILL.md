@@ -62,7 +62,7 @@ python3 skills/builtin/ecom-details-image/scripts/generate_image.py --env-file .
 - 保留 `--prompt` / `--prompt-file`、`--output-dir`、`--image`、`--size`、`--n` 等旧参数；新增 `--provider`、`--mask`。输出默认 `outputs/电商商品图/`，实际任务应指定具体商品项目；每次调用生成唯一文件名，重跑保留旧图。
 - `--size` 支持像素及常见比例（1:1→1024x1024、3:2→1536x1024、2:3→1024x1536）；比例转换不代表所有模型都支持该尺寸。`--resolution` 只用于旧异步服务，不能把它当同步模型的画质设置。
 - `--timeout` 省略使用统一入口/实例默认；`--format` 默认 png，`--poll-interval` 仅旧异步接口使用。
-- 有商品参考图必须传 `--image`，走统一 img2img，不得丢掉参考图退回文生图。先核实实例 supports_edit；Qwen 当前仅文生图，不能用于要求保持商品外观的编辑或作为其额度后备。没有可用编辑实例时说明原因。
+- 有商品参考图必须传 `--image`，走统一 img2img，不得丢掉参考图退回文生图。先核实实例 supports_edit；Qwen 已支持普通单图编辑，须开启 supports_edit 与 edit_size_auto，保留参考图比例；不传 quality/mask，不用于多参考图或遮罩任务。切换模型后仍须检查商品细节是否保留。没有可用编辑实例时说明原因。
 - 先输出最终 Prompt，再调用；通过统一入口 `check` 核对配置，不再只凭 IMG_API_KEY 判断。模型拒绝参数就说明具体限制，不盲目重交。
 - 输出后检查商品外观、品牌文字和实际尺寸；参考图输入不保证精确还原。逐张提供 Markdown 图片引用并标注模型。
 
