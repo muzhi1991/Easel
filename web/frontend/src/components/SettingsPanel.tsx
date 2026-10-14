@@ -399,12 +399,13 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
 
   useEffect(() => {
     const refresh = () => { void fetchModelChannels().then((d) => {
-      setMediaRows((m) => ({ ...m, video: d.channels.video?.rows || [], speech: d.channels.speech?.rows || [], music: d.channels.music?.rows || [] }));
+      setMediaRows((m) => ({ ...m, image: d.channels.image?.rows || [], video: d.channels.video?.rows || [], speech: d.channels.speech?.rows || [], music: d.channels.music?.rows || [] }));
     }); };
     window.addEventListener('easel-media-config', refresh);
     return () => window.removeEventListener('easel-media-config', refresh);
   }, []);
 
+  const [imageAdapterConfigured, setImageAdapterConfigured] = useState(false);
   const [videoAdapterConfigured, setVideoAdapterConfigured] = useState(false);
   const [speechAdapterConfigured, setSpeechAdapterConfigured] = useState(false);
   const [musicAdapterConfigured, setMusicAdapterConfigured] = useState(false);
@@ -834,13 +835,14 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                 {chan === 'image' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${mediaOk('image') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('image') ? '已配置' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）</span>
+                      <span className={`pill ${(mediaOk('image') || imageAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('image') || imageAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
+                      <span className="desc">选择默认生图服务；对话中可指定其他模型</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.image || [], { onRow: (i, p) => updateMediaRow('image', i, p), media: true })}
-                    <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。</div>
-                    <MediaProviders channel="image" />
+                    <MediaProviders channel="image" onConfigured={setImageAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.image || [], {
+                      onRow: (i, p) => updateMediaRow('image', i, p), onPrimary: (i) => setMediaPrimary('image', i), media: true,
+                    }, extra)} />
+                    <div className="foot-note">使用默认生图实例；可在对话中指定模型或要求多模型对比。</div>
                   </section>
                 )}
 
@@ -848,7 +850,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${(mediaOk('video') || videoAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('video') || videoAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）；「主/备」= 默认</span>
+                      <span className="desc">选择默认生图服务；对话中可指定其他模型；「主/备」= 默认</span>
                       <span className="spacer" />
                     </div>
                     <MediaProviders channel="video" onConfigured={setVideoAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.video || [], {

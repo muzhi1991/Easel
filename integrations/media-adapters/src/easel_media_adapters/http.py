@@ -44,10 +44,10 @@ class CurlClient:
     def get(self, url):
         return self._request("GET", url)
 
-    def post(self, url, *, data, files):
-        return self._request("POST", url, data, files)
+    def post(self, url, *, data=None, files=None, json=None):
+        return self._request("POST", url, data, files, json_body=json)
 
-    def _request(self, method, url, data=None, files=None):
+    def _request(self, method, url, data=None, files=None, json_body=None):
         with tempfile.TemporaryDirectory(prefix="easel-http-") as tmp:
             output = Path(tmp) / "response"
             lines = ["silent", "show-error", f"url = {json.dumps(url)}", f"request = {json.dumps(method)}",
@@ -57,6 +57,11 @@ class CurlClient:
                 lines.append('noproxy = "*"')
             for key, val in self.headers.items():
                 lines.append(f"header = {json.dumps(key + ': ' + val)}")
+            if json_body is not None:
+                body = Path(tmp) / "request.json"
+                body.write_text(json.dumps(json_body, ensure_ascii=False))
+                lines.append('header = "Content-Type: application/json"')
+                lines.append(f"data-binary = {json.dumps('@' + str(body))}")
             for key, val in (data or {}).items():
                 for item in val if isinstance(val, (list, tuple)) else [val]:
                     lines.append(f"form-string = {json.dumps(key + '=' + str(item), ensure_ascii=False)}")

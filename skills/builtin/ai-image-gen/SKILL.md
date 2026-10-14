@@ -22,20 +22,18 @@ layer: produce
 
 > **配置检查路径铁律**：先 `cd` 到运行时说明给出的 Easel 项目根，确认当前目录有 `.env` 和 `skills/shared/scripts/ai_image.py`，再运行下列命令。不得在任何执行引擎的 workspace 或共享脚本副本中检查，也不得用 `env` / `printenv` 代替读取项目 `.env`；否则会把已配置的 `IMG_BASE_URL`/Key 误判为缺失。
 
-需在项目根目录 `.env` 中设置三项（脚本从当前目录向上自动查找 `.env`）：
+优先查询 `.venv/bin/python -m easel.media providers`，其中 image 实例保存模型、地址与能力，`defaults.image` 是设置页默认。一个 Skill 调用多个实例，不为每个模型建 Skill。
 
-| 变量 | 说明 | 兼容别名 |
-|---|---|---|
-| `IMG_BASE_URL` | API 根地址 | `OPENAI_BASE_URL` / `OPENAI_API_BASE` / `BASE_URL` |
-| `IMG_MODEL` | 图片模型名 | `OPENAI_IMAGE_MODEL` / `IMAGE_MODEL` / `OPENAI_MODEL` |
-| `IMG_API_KEY` | API key | `OPENAI_API_KEY` / `API_KEY` |
+### 模型选择规则
 
-支持两类服务，脚本按 `base_url` 自动检测（也可 `--mode sync|async` 强制）：
+- 用户明确指定模型时优先遵从；未指定时使用 image 默认实例（本部署默认 GPT Image Flare）。用 `--provider <实例ID>` 只影响本次任务，不修改全局默认。
+- Flare 返回明确额度耗尽标记 `IMAGE_QUOTA_EXHAUSTED` 时，可改用已配置的自部署 Qwen Image，并告知用户实际模型。普通429限流、超时、网络错误或提交状态未知不等于额度不足，不重交或自动切换。
+- 用户要求更多图片做对比时，可用同一需求同时调用 Flare 和自部署 Qwen；分别指定实例、输出文件名并标注模型。不因普通生图请求擅自生成多份。
+- 用户对质量不满意或明确要求重新生成，且未指定模型时，优先 GPT Image Sunburst；这是用户发起的新一轮生成，保留原图。传输故障后的恢复不属于质量重跑。
+- 通过查询结果的模型名匹配实例 ID，不假定固定 ID；所需模型未配置就说明。Qwen 当前仅文生图，不能把编辑任务悄悄改成文生图；对比时共同使用1024x1024、每次1张，Qwen 不传 quality。
+- 参数和能力以实例为准：`supports_edit=false` 不调用 img2img；模型名不能代替实际效果验证。失败不循环重试；Sunburst失败也不要自动再换一圈。
 
-- **OpenAI 兼容（同步）**：`base_url` 不含 apimart。走 `/images/generations`、`/images/edits`、`/images/variations`。
-  示例：`IMG_BASE_URL=https://api.openai.com/v1`，`IMG_MODEL=gpt-image-1`。
-- **apimart（异步轮询）**：`base_url` 含 `apimart`。提交任务 → 轮询 `/tasks/<id>` → 下载。
-  示例：`IMG_BASE_URL=https://api.apimart.ai/v1`。
+没有 image 默认实例时沿用 `.env` 的 `IMG_BASE_URL`、`IMG_MODEL`、`IMG_API_KEY`。显式 `--provider legacy` 也可调用该旧配置；OpenAI 兼容走同步接口，apimart 走异步接口。
 
 ## 执行步骤
 
@@ -45,7 +43,7 @@ layer: produce
 python skills/shared/scripts/ai_image.py check
 ```
 
-打印三项配置状态（key 脱敏显示）、命中的别名、自动检测的模式。缺项时给出 `.env` 填写示例并以退出码 2 结束。**配置未就绪就不要往下走**，直接把缺什么、怎么配告诉用户。
+打印当前默认实例及能力；旧配置则打印脱敏配置和自动检测模式。可加 `--provider <实例ID>` 检查指定模型。**配置未就绪就不要往下走**，直接把缺什么、怎么配告诉用户。
 
 ### 2. 文生图 text2img
 
@@ -61,7 +59,8 @@ python skills/shared/scripts/ai_image.py text2img \
 - `--size`：同步模式用像素（`1024x1024` / `1536x1024` / `1024x1536`…）；异步模式用比例（`1:1` / `16:9` / `9:16`…）。
 - `--n`：生成张数（多张时按序号自动命名）。
 - `--output`：目录（多张自动编号）或含扩展名的单文件；统一放 `outputs/主题名/`。
-- `--timeout`：同步生成请求或异步轮询超时秒，默认180；不包含下载时间。慢速同步服务可显式传 `--timeout 1800`，超时先检查服务端状态，不自动重交。
+- `--provider`：指定媒体实例；省略时使用 image 默认实例。
+- `--timeout`：同步生成请求或异步轮询超时秒；媒体实例使用自身配置（默认1800），旧配置默认180；不包含下载时间。慢速同步服务可显式传 `--timeout 1800`，超时先检查服务端状态，不自动重交。
 - 同步可加 `--quality low|medium|high`（仅限支持该参数的服务）；异步可加 `--resolution 1k|2k|4k`。
 - 若当前模型为 `qwen-image-2.1-uc-bf16`：接口仅支持文生图，使用 `--timeout 1800 --n 1`，尺寸限512/768/1024/1536/2048的正方形，默认1024x1024；不传 `--quality`，不调用下述 img2img/variations。服务繁忙429或超时不重复提交。
 
@@ -88,7 +87,7 @@ python skills/shared/scripts/ai_image.py variations \
 
 ### 5. 交付
 
-告诉用户产物路径、生成参数（模式/模型/尺寸/张数）。如需再改尺寸/加水印/压缩，转 `image-editing`。
+确认文件存在后，用 `![模型说明](URL)`（URL 使用 `outputs/主题名/图片.png`） 逐张返回；对比图标明各自模型，保留旧版本。告诉用户生成参数（模型/尺寸/张数）。如需再改尺寸/加水印/压缩，转 `image-editing`。
 
 ## 产物
 

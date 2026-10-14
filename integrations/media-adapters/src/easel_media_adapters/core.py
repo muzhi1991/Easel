@@ -42,6 +42,19 @@ class SpeechRequest:
 
 
 @dataclass(frozen=True)
+class ImageRequest:
+    prompt: str
+    output: Path
+    n: int = 1
+    size: str = "1024x1024"
+    quality: str | None = None
+    format: str = "png"
+    image: Path | None = None
+    mask: Path | None = None
+    timeout: float | None = None
+
+
+@dataclass(frozen=True)
 class MusicRequest:
     prompt: str
     output: Path
@@ -122,7 +135,8 @@ class MediaRuntime:
             from .rapidocr import RapidOCRAdapter
             from .speech import OpenAISpeechAdapter
             from .yue2 import YuE2Adapter
-            adapters = {"qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter(), "openai-speech": OpenAISpeechAdapter(), "yue2-music": YuE2Adapter()}
+            from .image import OpenAIImageAdapter
+            adapters = {"openai-image": OpenAIImageAdapter(), "qwen-asr-aligner": QwenAdapter(), "openai-transcription": OpenAITranscriptionAdapter(), "h3-video": H3Adapter(), "rapidocr": RapidOCRAdapter(), "openai-speech": OpenAISpeechAdapter(), "yue2-music": YuE2Adapter()}
             for entry in importlib.metadata.entry_points(group="easel.media_adapters"):
                 if entry.name not in adapters:
                     adapters[entry.name] = entry.load()()
