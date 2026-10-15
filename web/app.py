@@ -1146,6 +1146,19 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html", media_type="text/html", headers=no_cache)
 
 
+@app.get("/sw.js")
+@app.get("/manifest.webmanifest")
+@app.get("/app-icon.png")
+async def pwa_resource(request: Request):
+    # Fixed allowlist: do not expose arbitrary frontend files or source maps.
+    name = request.url.path.rsplit("/", 1)[-1]
+    media = {"sw.js": "application/javascript", "manifest.webmanifest": "application/manifest+json", "app-icon.png": "image/png"}
+    fp = REACT_DIR / name
+    if name not in media or not fp.is_file():
+        raise HTTPException(404)
+    return FileResponse(fp, media_type=media[name], headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/onepage")
 async def onepage():
     return FileResponse(STATIC_DIR / "onepage.html", media_type="text/html")

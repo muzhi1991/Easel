@@ -33,3 +33,25 @@ node --test tests/frontend/chatRefresh.test.mjs
 浏览器回归脚本为 `tests/frontend/chat_scroll_browser.py`，使用模拟 API，不调用真实模型。先在 `web/frontend` 启动 Vite（端口 5179），再从根目录执行脚本；也可用脚本的 --url 参数验证构建产物。覆盖桌面滚轮、手机触摸、首页不取正文、50 条分页、上滑锚点、重试绝对索引及流式滚动。
 
 部署必须同时更新后端与前端：旧前端依赖列表中的 messages，不能仅重启后端。按 [Fork 维护流程](fork-maintenance.md) 构建和重启 Web；已有浏览器标签页随后刷新。升级前备份 SQLite 会话库，不删除旧正文或用户配置。
+
+## 浏览器持久缓存与 PWA
+
+生产构建支持 PWA：通过可信 HTTPS（本机开发也可以用 localhost）访问一次并完成资源缓存后，可安装并离线打开应用。Chrome/Edge 在满足安装条件时提供“安装 Easel”按钮；iPhone/iPad 使用 Safari 分享菜单的“添加到主屏幕”。普通局域网 HTTP 仍支持会话持久缓存，但不启用 Service Worker，也不保证断网时能重新打开页面。
+
+消息保存在 IndexedDB，与旧 localStorage 记录分开。首页只读取摘要，不读取所有消息；点击会话后才恢复该会话已加载的消息窗口。联网后核对摘要，使用现有 after/epoch 接口补齐新消息。缓存以 origin 和部署路径隔离，因此 HTTP、HTTPS、不同端口或浏览器不会共享缓存。服务端仍是唯一权威数据源；浏览器清理或驱逐缓存不会删除服务端对话。
+
+只缓存服务端确认的消息页，不保存流式中间状态或未提交的消息。重试导致 historyEpoch 变化、服务端删除会话时会清理相应缓存。多个标签页对相邻或重叠消息页的写入通过 IndexedDB 事务合并。消息缓存保留最近使用的最多 50 个会话、合计最多 50 MiB，30 天未使用的窗口会被淘汰；摘要列表不分页。IndexedDB 不可用或容量不足时自动退回网络加载。
+
+离线可阅读已经缓存的消息文本；附件、图片、生成产物和其他业务页面不保证离线可用。未缓存的历史需要联网加载，离线不排队发送消息。恢复连接后先核对服务端记录再允许发送。
+
+Service Worker 只缓存当前版本的 HTML、打包 JS/CSS、应用图标和 manifest，不缓存 API、SSE、账号配置、上传或用户产物。构建内容变化会生成新版本；安装新资源完成后显示“更新并刷新”。其他窗口有进行中的对话或当前输入框草稿时拒绝更新；允许更新后刷新应用窗口并清理旧资源。暂不更新时继续使用旧版本，因此部署后端接口时仍需考虑旧标签页的兼容性。不同部署子路径的资源缓存互不清理。
+
+部署时前端构建产物与后端的 `/sw.js`、`/manifest.webmanifest`、`/app-icon.png` 路由一起更新。代理需要转发这些路径，并保持同源。Service Worker 和 manifest 使用 `Cache-Control: no-cache`，让浏览器及时发现更新；普通 JS/CSS 继续使用带 hash 的长期缓存。
+
+新增浏览器回归使用真实 IndexedDB 和 Service Worker、模拟业务 API，包含桌面和手机的刷新恢复、离线重开、增量与旧页合并、历史重写、删除、缓存容量和跨窗口更新保护。先构建，并用本地静态服务器提供 `web/frontend/dist`：
+
+```bash
+.venv/bin/python tests/frontend/pwa_history_browser.py --url http://127.0.0.1:5179/
+```
+
+该测试会临时替换本地构建产物 `sw.js` 的版本并在结束时恢复；只用于测试服务器，不要对运行中的生产目录执行。
