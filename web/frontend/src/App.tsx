@@ -33,6 +33,9 @@ import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import type { SharedTurn } from './lib/api';
 import { loadSharedSessions, getSharedSession, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
 
+import { readCachedSummaries, readCachedHistory } from './lib/historyCache';
+import PwaNotice from './components/PwaNotice';
+
 import { historyEnd, mergeSessionSummary, mergeMessagePage } from './lib/sessionHistory';
 
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
@@ -64,10 +67,20 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [historyReady, setHistoryReady] = useState(false);
+  const [historyVerified, setHistoryVerified] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
+  const hydrated = useRef(new Set<string>());
+  useEffect(() => {
+    const update = () => { setOnline(navigator.onLine); if (!navigator.onLine) setHistoryVerified(false); };
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
   const [showImportLocal, setShowImportLocal] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
   const historyBusy = useRef(new Set<string>());
   const reportHistoryError = useCallback((error: unknown) => {
+    setHistoryVerified(false);
     setHistoryError(error instanceof Error ? error.message : '共享会话暂时不可用，请重试');
   }, []);
   // 装完还没配模型时，首开要把用户直接带到模型设置页（安装脚本不再在终端问 Key）
@@ -98,16 +111,20 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
+      const cached = await readCachedSummaries();
+      if (cancelled) return;
+      if (cached.length) {
+        setSessions(prev => prev.some(s => s.source === 'server' && s.revision) ? prev : [...cached, ...loadSessions()]);
+        setHistoryReady(true);
+      }
       try {
         const shared = await loadSharedSessions();
         if (cancelled) return;
-        const existing = [...shared, ...loadSessions()];
-        const last = sessionStorage.getItem(TAB_SESSION_KEY) || loadActiveId();
-        const target = existing.find((s) => s.id === last) || existing.find((s) => s.id === `shared_${last}`);
-        const selected = target || createSession();
-        setSessions(target ? existing : [selected, ...existing]);
-        setActiveSessionId(selected.id);
-        setSelectedPersona(selected.persona || '');
+        setSessions(prev => {
+          const byId = new Map(prev.map(s => [s.id, s]));
+          return [...shared.map(s => mergeSessionSummary(byId.get(s.id), s)), ...loadSessions()];
+        });
+        setHistoryVerified(true);
         setHistoryReady(true);
         setHistoryError('');
       } catch (error) { if (!cancelled) reportHistoryError(error); }
@@ -117,6 +134,16 @@ export default function App() {
     window.addEventListener('easel-retry-history', retry);
     return () => { cancelled = true; window.removeEventListener('easel-retry-history', retry); };
   }, [reportHistoryError]);
+
+  useEffect(() => {
+    if (!historyReady || activeSessionId) return;
+    const last = sessionStorage.getItem(TAB_SESSION_KEY) || loadActiveId();
+    const target = sessions.find(s => s.id === last || s.id === `shared_${last}`);
+    const selected = target || createSession();
+    if (!target) setSessions(prev => [selected, ...prev]);
+    setActiveSessionId(selected.id);
+    setSelectedPersona(selected.persona || '');
+  }, [historyReady, activeSessionId, sessions]);
 
   // 持久化当前活跃会话 id，重开网页据此续接上次对话（修复"今天再问就忘了"）。
   // 仅在非空时写：避免挂载首刷 activeSessionId 尚为 null 时误清掉已存的 id。
@@ -189,6 +216,8 @@ export default function App() {
   const refreshShared = useCallback(async (forceId?: string) => {
     const knownIds = new Set(sessionsRef.current.map((s) => s.id));
     const incoming = await loadSharedSessions();
+    setHistoryVerified(true);
+    setHistoryError('');
     setSessions((prev) => {
       const previous = new Map(prev.map((item) => [item.id, item]));
       const shared = incoming.map((item) => mergeSessionSummary(previous.get(item.id), item));
@@ -210,16 +239,35 @@ export default function App() {
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     const timer = setInterval(onVisible, 5000);
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('online', refresh); document.removeEventListener('visibilitychange', onVisible); };
   }, [historyReady, refreshShared, reportHistoryError]);
 
   const messageRequests = useRef(new Set<string>());
   const [messageLoading, setMessageLoading] = useState<Record<string, boolean>>({});
   const [messageErrors, setMessageErrors] = useState<Record<string, string>>({});
   const loadMessages = useCallback(async (id: string, older = false) => {
-    const current = sessionsRef.current.find((s) => s.id === id);
+    let current = sessionsRef.current.find((s) => s.id === id);
     if (!current || current.source !== 'server' || !current.revision || messageRequests.current.has(id)) return;
+    if (!hydrated.current.has(id) && !current.historyLoaded) {
+      messageRequests.current.add(id);
+      setMessageLoading(p => ({ ...p, [id]: true }));
+      const cached = await readCachedHistory(id);
+      hydrated.current.add(id);
+      messageRequests.current.delete(id);
+      current = sessionsRef.current.find(s => s.id === id);
+      if (current && cached && current.historyEpoch === cached.historyEpoch && !current.optimistic) {
+        const restored = mergeSessionSummary(cached, current);
+        setSessions(prev => prev.map(s => s.id === id && !s.historyLoaded && s.historyEpoch === cached.historyEpoch ? mergeSessionSummary(cached, s) : s));
+        current = restored;
+      }
+      setMessageLoading(p => ({ ...p, [id]: false }));
+    }
+    if (!current || !navigator.onLine || !historyVerified) {
+      if (current && !current.historyLoaded) setMessageErrors(p => ({ ...p, [id]: '此会话尚未缓存，请联网后加载。' }));
+      return;
+    }
     if (older && (!current.historyLoaded || !current.messageStart)) return;
     if (!older && (current.optimistic || streamCtl.current[id] || historyBusy.current.has(id))) return;
     if (!older && current.historyLoaded && historyEnd(current) >= (current.messageCount || 0)) return;
@@ -246,7 +294,11 @@ export default function App() {
       messageRequests.current.delete(id);
       setMessageLoading((p) => ({ ...p, [id]: false }));
     }
-  }, []);
+  }, [historyVerified]);
+
+  useEffect(() => {
+    if (online && historyVerified) setMessageErrors({});
+  }, [online, historyVerified]);
 
   // Home loads summaries only. Selected conversations fetch their latest page,
   // and later fetch just appended messages when the summary count advances.
@@ -598,9 +650,9 @@ export default function App() {
 
   // 活跃会话确定后（含挂载首刷）尝试恢复它悬空的一轮
   useEffect(() => {
-    if (currentPage === 'chat' && activeSessionId && (activeSession?.source !== 'server'
+    if (online && historyVerified && currentPage === 'chat' && activeSessionId && (activeSession?.source !== 'server'
       || activeSession.historyLoaded && historyEnd(activeSession) === activeSession.messageCount)) resumePendingTurn(activeSessionId);
-  }, [currentPage, activeSessionId, activeSession, resumePendingTurn]);
+  }, [currentPage, activeSessionId, activeSession, resumePendingTurn, online, historyVerified]);
 
   // 落用户消息（可选先把 messages 截断到 truncateAt）→ 启动流。retry/edit 都走这里。
   const sendUserAndStream = useCallback(async (
@@ -614,7 +666,7 @@ export default function App() {
     const agentMessage = (legacyAgentText || displayText).trim();
     if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || historyBusy.current.has(sessionId)) return false;
     let cur = sessionsRef.current.find((s) => s.id === sessionId);
-    if (!cur || !historyReady) return false;
+    if (!cur || !historyReady || !navigator.onLine || !historyVerified) return false;
     if (cur.source === 'server' && (!cur.historyLoaded || historyEnd(cur) !== cur.messageCount)) return false;
     if (cur.pendingTurnId) { setHistoryError('此会话正在回复中，请等待完成或先停止。'); return false; }
     historyBusy.current.add(sessionId);
@@ -648,7 +700,7 @@ export default function App() {
       void refreshShared().catch(reportHistoryError);
       return false;
     } finally { historyBusy.current.delete(sessionId); }
-  }, [historyReady, startStream, reportHistoryError, refreshShared]);
+  }, [historyReady, historyVerified, startStream, reportHistoryError, refreshShared]);
 
   const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[]) => {
     return sendUserAndStream(sessionId, displayText, attachments);
@@ -868,6 +920,7 @@ export default function App() {
             apiDirect={apiDirect}
             key={activeSession.id}
             session={activeSession}
+            readOnly={!online || !historyVerified}
             historyLoading={!!messageLoading[activeSession.id]}
             historyError={messageErrors[activeSession.id]}
             onLoadHistory={(older) => loadMessages(activeSession.id, older)}
@@ -980,7 +1033,11 @@ export default function App() {
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}
-        {historyError && <div className="history-notice" role="alert">
+        <PwaNotice busy={Object.keys(streams).length > 0 || sessions.some(s => !!s.pendingTurnId)} />
+        {(!online || !historyVerified) && historyReady && <div className="history-notice" role="status">
+          {!online ? '当前离线，可阅读已缓存的对话。联网后自动同步。' : '正在核对服务端记录，当前显示本地缓存。'}
+        </div>}
+        {historyError && online && <div className="history-notice" role="alert">
           <span>{historyError}</span>
           <button className="btn btn-sm" onClick={() => {
             if (historyReady) void refreshShared().then(() => setHistoryError('')).catch(reportHistoryError);

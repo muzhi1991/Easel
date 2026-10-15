@@ -13,6 +13,7 @@ interface ChatPageProps {
   apiDirect: boolean;
   session: ChatSession;
   historyLoading?: boolean;
+  readOnly?: boolean;
   historyError?: string;
   onLoadHistory?: (older: boolean) => Promise<void>;
   onThinkingChange: (level?: ThinkingLevel) => void;
@@ -42,7 +43,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ apiDirect, session, stream, historyLoading = false, historyError, onLoadHistory, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
+export default function ChatPage({ apiDirect, session, stream, historyLoading = false, readOnly = false, historyError, onLoadHistory, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
@@ -71,6 +72,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
   }, []);
 
   const doUpload = async (fs: FileList | File[]) => {
+    if (readOnly) return;
     const arr = Array.from(fs);
     if (!arr.length) return;
     const cap = maxMb * 1024 * 1024;
@@ -161,7 +163,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
 
   const handleSend = async () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting || missingLatest) return;
+    if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting || missingLatest || readOnly) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     setSubmitting(true);
     followMessagesRef.current = true;
@@ -221,14 +223,14 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
         onChange={(e) => { if (e.target.files) doUpload(e.target.files); e.target.value = ''; }} />
       <div className="composer-bar">
         <button className="composer-attach-btn" onClick={() => fileInputRef.current?.click()}
-          disabled={isStreaming || uploading} title={`添加素材（图片/文档）；超过 ${maxMb}MB 的大文件将自动存为本地素材（不走上传）`}>
+          disabled={readOnly || isStreaming || uploading} title={`添加素材（图片/文档）；超过 ${maxMb}MB 的大文件将自动存为本地素材（不走上传）`}>
           <IconPlus size={15} /><span>{uploading ? '上传中…' : '素材'}</span>
         </button>
         <ChatModelControls apiDirect={apiDirect} sessionId={session.id} streaming={isStreaming} thinking={session.thinking} onThinkingChange={onThinkingChange} />
         {isStreaming ? (
           <button className="send-btn" onClick={onStop} title="停止生成"><IconStop size={15} /></button>
         ) : (
-          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || submitting || missingLatest} title="发送"><IconArrowUp size={17} /></button>
+          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || submitting || missingLatest || readOnly} title="发送"><IconArrowUp size={17} /></button>
         )}
       </div>
       <div className="composer-hint">{isStreaming ? '生成中…' : 'Enter 发送 · Shift+Enter 换行'}</div>
@@ -237,7 +239,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
 
   if (waitingForHistory) {
     return <div className="chat-page"><div className="chat-history-status" role="status">
-      {historyError || '正在加载消息…'}
+      {historyError || (readOnly ? '此会话尚未缓存，请联网后加载。' : '正在加载消息…')}
       {historyError && <button className="btn btn-sm" onClick={() => onLoadHistory?.(false)}>重试</button>}
     </div></div>;
   }
@@ -310,7 +312,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
         <div className="chat-thread" ref={threadRef}>
           {(!!session.messageStart || historyError || missingLatest) && <div className="chat-history-controls" role="status">
             {historyError && <span>{historyError}</span>}
-            <button className="btn btn-sm" disabled={historyLoading} onClick={() => {
+            <button className="btn btn-sm" disabled={historyLoading || readOnly} onClick={() => {
               followMessagesRef.current = false;
               void onLoadHistory?.(!missingLatest);
             }}>{historyLoading ? '正在加载…' : historyError ? '重试加载消息' : missingLatest ? '加载新消息' : '加载更早消息'}</button>
@@ -330,7 +332,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
                   onRetry: isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
-                  canModify: !isStreaming && !missingLatest,
+                  canModify: !readOnly && !isStreaming && !missingLatest,
                 };
               } else {
                 const pi = i - 1;
@@ -340,7 +342,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
                   onRetry: (isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,
-                  canModify: !isStreaming && !missingLatest,
+                  canModify: !readOnly && !isStreaming && !missingLatest,
                 };
               }
             }

@@ -1,10 +1,11 @@
 import type { ChatSession } from './store';
 import { loadSessions, MIGRATED_KEY } from './store';
+import { cacheSummaries, cacheMessagePage, removeCachedSession, readCachedSummaries } from './historyCache';
 
 const base = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
 async function request<T>(path = '', method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`${base}/api/conversations${path}`, {
-    method, headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store', method, headers: { 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {
@@ -15,20 +16,37 @@ async function request<T>(path = '', method = 'GET', body?: unknown): Promise<T>
 }
 const summarySession = (summary: Omit<ChatSession, 'messages'>): ChatSession => ({ ...summary, messages: [],
   messageStart: 0, historyLoaded: summary.messageCount === 0 });
-export const loadSharedSessions = async () => (await request<Omit<ChatSession, 'messages'>[]>()).map(summarySession);
-export const getSharedSession = (id: string, options: { before?: number; after?: number; epoch?: number } = {}) => {
+let listSequence = 0;
+export const loadSharedSessions = async () => {
+  const sequence = ++listSequence;
+  const known = readCachedSummaries();
+  const summaries = (await request<Omit<ChatSession, 'messages'>[]>()).map(summarySession);
+  if (sequence === listSequence) await cacheSummaries(summaries, true, new Set((await known).map(s => s.id)));
+  return summaries;
+};
+export const getSharedSession = async (id: string, options: { before?: number; after?: number; epoch?: number } = {}) => {
   const query = new URLSearchParams({ limit: '50' });
   for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
-  return request<ChatSession>(`/${encodeURIComponent(id)}?${query}`);
+  const page = await request<ChatSession>(`/${encodeURIComponent(id)}?${query}`);
+  await cacheMessagePage(page);
+  return page;
 };
-export const ensureSharedSession = (s: ChatSession) => s.revision
-  ? Promise.resolve(s) : request<Omit<ChatSession, 'messages'>>('', 'POST', s).then(summarySession);
+export const ensureSharedSession = async (s: ChatSession) => {
+  if (s.revision) return s;
+  const saved = summarySession(await request<Omit<ChatSession, 'messages'>>('', 'POST', s));
+  await cacheSummaries([saved], false);
+  return saved;
+};
 export async function patchSharedSession(s: ChatSession, changes: Partial<ChatSession>): Promise<ChatSession> {
   const current = await ensureSharedSession(s);
-  return summarySession(await request(`/${encodeURIComponent(s.id)}`, 'PATCH', { ...changes, ...(Object.hasOwn(changes, 'persona') ? { persona: changes.persona || null } : {}), revision: current.revision }));
+  const saved = summarySession(await request(`/${encodeURIComponent(s.id)}`, 'PATCH', { ...changes, ...(Object.hasOwn(changes, 'persona') ? { persona: changes.persona || null } : {}), revision: current.revision }));
+  await cacheSummaries([saved], false);
+  return saved;
 }
-export const deleteSharedSession = (s: ChatSession) => s.revision
-  ? request(`/${encodeURIComponent(s.id)}?revision=${s.revision}`, 'DELETE') : Promise.resolve();
+export const deleteSharedSession = async (s: ChatSession) => {
+  if (s.revision) await request(`/${encodeURIComponent(s.id)}?revision=${s.revision}`, 'DELETE');
+  await removeCachedSession(s.id);
+};
 
 /** This runs only after an explicit click in the browser chosen for migration. */
 export async function importLocalSessions(): Promise<number> {

@@ -26,6 +26,7 @@ async function refresh(current, incoming, streaming = false) {
   let result;
   const context = {
     mergeSessionSummary: history.mergeSessionSummary,
+    setHistoryVerified: () => {}, setHistoryError: () => {},
     sessionsRef: { current }, historyBusy: { current: new Set() },
     streamCtl: { current: streaming ? { shared_test: {} } : {} },
     loadSharedSessions: async () => structuredClone(incoming.map(summary)), loadSessions: () => [],
