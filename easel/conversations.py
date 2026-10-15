@@ -34,6 +34,13 @@ class Conversations:
                        '(id TEXT PRIMARY KEY, data TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)')
             db.execute('CREATE TABLE IF NOT EXISTS turns (id TEXT PRIMARY KEY, conversation TEXT NOT NULL)')
             db.execute('BEGIN IMMEDIATE')
+            if 'summary' not in {row[1] for row in db.execute('PRAGMA table_info(conversations)')}:
+                # One transactional migration; subsequent list reads never load
+                # message blobs. All writes keep the summary in the same commit.
+                db.execute('ALTER TABLE conversations ADD COLUMN summary TEXT')
+                db.execute("UPDATE conversations SET summary = json_set(json_remove(data, '$.messages'), "
+                           "'$.messageCount', json_array_length(data, '$.messages'), "
+                           "'$.historyEpoch', coalesce(json_extract(data, '$.historyEpoch'), 0)) WHERE deleted=0")
             yield db
             db.commit()
         finally:
@@ -47,20 +54,38 @@ class Conversations:
         return json.loads(row[0])
 
     @staticmethod
+    def summary(data):
+        return {**{key: value for key, value in data.items() if key != 'messages'},
+                'messageCount': len(data.get('messages', [])), 'historyEpoch': data.get('historyEpoch', 0)}
+
+    @staticmethod
     def _put(db, data):
         data['revision'] += 1
-        db.execute('UPDATE conversations SET data=? WHERE id=?',
-                   (json.dumps(data, ensure_ascii=False), data['id']))
+        db.execute('UPDATE conversations SET data=?, summary=? WHERE id=?',
+                   (json.dumps(data, ensure_ascii=False), json.dumps(Conversations.summary(data), ensure_ascii=False), data['id']))
         return data
 
     def list(self):
         with self.transaction() as db:
-            rows = [json.loads(row[0]) for row in db.execute('SELECT data FROM conversations WHERE deleted=0')]
+            rows = [json.loads(row[0]) for row in db.execute('SELECT summary FROM conversations WHERE deleted=0')]
         return sorted(rows, key=lambda s: s['created'], reverse=True)
 
     def get(self, identifier):
         with self.transaction() as db:
             return self._get(db, identifier)
+
+    def page(self, identifier, limit=50, before=None, after=None, epoch=None):
+        data = self.get(identifier)
+        if epoch is not None and epoch != data.get('historyEpoch', 0):
+            raise Conflict('历史消息已被重试替换，请重新加载会话')
+        total = len(data['messages'])
+        if after is not None:
+            start = min(after + 1, total)
+            end = min(start + limit, total)
+        else:
+            end = total if before is None else min(before, total)
+            start = max(0, end - limit)
+        return {**self.summary(data), 'messageStart': start, 'messages': data['messages'][start:end]}
 
     def create(self, data, *, importing=False):
         data = dict(data)
@@ -79,8 +104,8 @@ class Conversations:
                 data['messages'] = []
             elif data['messages'] and data['messages'][-1]['role'] == 'user':
                 data['messages'].append({'role': 'assistant', 'content': '（旧会话的上一轮未完成，请重试。）'})
-            db.execute('INSERT INTO conversations(id, data) VALUES (?, ?)',
-                       (identifier, json.dumps(data, ensure_ascii=False)))
+            db.execute('INSERT INTO conversations(id, data, summary) VALUES (?, ?, ?)',
+                       (identifier, json.dumps(data, ensure_ascii=False), json.dumps(self.summary(data), ensure_ascii=False)))
             return data
 
     def patch(self, identifier, revision, changes):
@@ -104,7 +129,7 @@ class Conversations:
             if data.get('pendingTurnId'):
                 raise Conflict('请先停止正在运行的对话')
             # Keep only the tombstone, not the deleted transcript.
-            db.execute('UPDATE conversations SET deleted=1, data=? WHERE id=?', ('{}', identifier))
+            db.execute('UPDATE conversations SET deleted=1, data=?, summary=NULL WHERE id=?', ('{}', identifier))
 
     def begin(self, identifier, revision, turn_id, message, title, truncate_at=None):
         with self.transaction() as db:
@@ -118,6 +143,7 @@ class Conversations:
                 if not 0 <= truncate_at < len(data['messages']) or data['messages'][truncate_at]['role'] != 'user':
                     raise Conflict('重试的消息已变化，请刷新后重试')
                 data['messages'] = data['messages'][:truncate_at]
+                data['historyEpoch'] = data.get('historyEpoch', 0) + 1
             data['messages'].append(message)
             data['title'] = title or data['title']
             data['pendingTurnId'] = turn_id

@@ -146,3 +146,50 @@ def test_legacy_stream_never_creates_shared_history(api, monkeypatch):
         await asyncio.gather(*list(web._BG_TASKS))
     asyncio.run(scenario())
     assert api.get('/api/conversations').json() == []
+
+
+def test_list_is_metadata_only_and_pages_cover_history_without_overlap(api):
+    messages = [{'role': 'assistant', 'content': f'message-{i}'} for i in range(123)]
+    api.post('/api/conversations/import', json=[conversation(messages=messages)])
+    summary = api.get('/api/conversations').json()[0]
+    assert 'messages' not in summary
+    assert summary['messageCount'] == 123
+    latest = api.get('/api/conversations/shared_old').json()
+    assert latest['messageStart'] == 73
+    assert latest['messages'] == messages[73:]
+    older = api.get('/api/conversations/shared_old?before=73&limit=50&epoch=0').json()
+    first = api.get('/api/conversations/shared_old?before=23&limit=50&epoch=0').json()
+    assert first['messageStart'] == 0
+    assert first['messages'] + older['messages'] + latest['messages'] == messages
+    assert api.get('/api/conversations/shared_old?limit=101').status_code == 422
+    assert api.get('/api/conversations/shared_old?before=-1').status_code == 422
+    assert api.get('/api/conversations/shared_old?before=5&after=1').status_code == 422
+
+
+def test_append_pages_and_retry_invalidate_old_cursor(store):
+    first = store.create(conversation(messages=[{'role': 'assistant', 'content': str(i)} for i in range(70)]), importing=True)
+    store.begin(first['id'], 1, 'next', {'role': 'user', 'content': 'new'}, '')
+    store.finish(first['id'], 'next', {'role': 'assistant', 'content': 'reply'})
+    page = store.page(first['id'], after=69, epoch=0)
+    assert [m['content'] for m in page['messages']] == ['new', 'reply']
+    assert page['messageStart'] == 70
+    store.begin(first['id'], 3, 'retry', {'role': 'user', 'content': 'retry'}, '', 70)
+    with pytest.raises(Conflict):
+        store.page(first['id'], before=20, epoch=0)
+    assert store.list()[0]['historyEpoch'] == 1
+
+
+def test_old_database_migrates_summaries_without_losing_history(tmp_path):
+    import sqlite3
+    path = tmp_path / 'old.sqlite'
+    original = conversation(source='server', revision=7, messages=[{'role': 'assistant', 'content': 'keep'}])
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE conversations (id TEXT PRIMARY KEY, data TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)')
+        db.execute('INSERT INTO conversations(id,data) VALUES (?,?)', (original['id'], json.dumps(original)))
+    migrated = Conversations(path)
+    assert migrated.list()[0]['messageCount'] == 1
+    assert 'messages' not in migrated.list()[0]
+    assert migrated.get(original['id']) == original
+    edited = migrated.patch(original['id'], 7, {'title': 'renamed'})
+    assert migrated.list()[0]['title'] == edited['title']
+    assert migrated.page(original['id'])['messages'] == original['messages']

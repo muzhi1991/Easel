@@ -9,17 +9,23 @@ async function request<T>(path = '', method = 'GET', body?: unknown): Promise<T>
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(typeof error.detail === 'string' ? error.detail : `会话保存失败 (${response.status})`);
+    throw Object.assign(new Error(typeof error.detail === 'string' ? error.detail : `会话保存失败 (${response.status})`), { status: response.status });
   }
   return response.json() as Promise<T>;
 }
-export const loadSharedSessions = () => request<ChatSession[]>();
-export const getSharedSession = (id: string) => request<ChatSession>(`/${encodeURIComponent(id)}`);
+const summarySession = (summary: Omit<ChatSession, 'messages'>): ChatSession => ({ ...summary, messages: [],
+  messageStart: 0, historyLoaded: summary.messageCount === 0 });
+export const loadSharedSessions = async () => (await request<Omit<ChatSession, 'messages'>[]>()).map(summarySession);
+export const getSharedSession = (id: string, options: { before?: number; after?: number; epoch?: number } = {}) => {
+  const query = new URLSearchParams({ limit: '50' });
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) query.set(key, String(value));
+  return request<ChatSession>(`/${encodeURIComponent(id)}?${query}`);
+};
 export const ensureSharedSession = (s: ChatSession) => s.revision
-  ? Promise.resolve(s) : request<ChatSession>('', 'POST', s);
+  ? Promise.resolve(s) : request<Omit<ChatSession, 'messages'>>('', 'POST', s).then(summarySession);
 export async function patchSharedSession(s: ChatSession, changes: Partial<ChatSession>): Promise<ChatSession> {
   const current = await ensureSharedSession(s);
-  return request(`/${encodeURIComponent(s.id)}`, 'PATCH', { ...changes, ...(Object.hasOwn(changes, 'persona') ? { persona: changes.persona || null } : {}), revision: current.revision });
+  return summarySession(await request(`/${encodeURIComponent(s.id)}`, 'PATCH', { ...changes, ...(Object.hasOwn(changes, 'persona') ? { persona: changes.persona || null } : {}), revision: current.revision }));
 }
 export const deleteSharedSession = (s: ChatSession) => s.revision
   ? request(`/${encodeURIComponent(s.id)}?revision=${s.revision}`, 'DELETE') : Promise.resolve();

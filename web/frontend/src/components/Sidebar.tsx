@@ -73,7 +73,7 @@ export default function Sidebar({
     setRenamingId(null);
   };
 
-  const active = sessions.filter((s) => !s.archived && (s.messages.length > 0 || s.id === activeSessionId));
+  const active = sessions.filter((s) => !s.archived && ((s.messageCount ?? s.messages.length) > 0 || s.id === activeSessionId));
   const archived = sessions.filter((s) => s.archived);
 
   const renderItem = (s: ChatSession, isArchived: boolean) => {

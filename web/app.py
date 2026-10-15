@@ -30,7 +30,7 @@ import ipaddress
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -2807,19 +2807,24 @@ def api_conversations():
 
 @app.post("/api/conversations")
 def api_conversation_create(req: ConversationCreate):
-    return _conversation_call("create", req.model_dump(exclude_none=True))
+    return Conversations.summary(_conversation_call("create", req.model_dump(exclude_none=True)))
 
 
 @app.post("/api/conversations/import")
 def api_conversations_import(req: list[ConversationCreate]):
     # Explicit import only. Other clients never call this during normal loading.
-    return [_conversation_call("create", item.model_dump(exclude_none=True), importing=True)
-            for item in req]
+    results = [_conversation_call("create", item.model_dump(exclude_none=True), importing=True) for item in req]
+    return [Conversations.summary(item) if item else None for item in results]
 
 
 @app.get("/api/conversations/{identifier}")
-def api_conversation_get(identifier: str):
-    return _conversation_call("get", identifier)
+def api_conversation_get(identifier: str, limit: int = Query(default=50, ge=1, le=100),
+                         before: int | None = Query(default=None, ge=0),
+                         after: int | None = Query(default=None, ge=0),
+                         epoch: int | None = Query(default=None, ge=0)):
+    if before is not None and after is not None:
+        raise HTTPException(422, 'before 和 after 不能同时使用')
+    return _conversation_call("page", identifier, limit, before, after, epoch)
 
 
 @app.patch("/api/conversations/{identifier}")
@@ -2827,7 +2832,7 @@ def api_conversation_patch(identifier: str, req: ConversationPatch):
     changes = req.model_dump(exclude_unset=True, exclude={"revision"})
     if changes.get("title", "") is None or changes.get("archived", False) is None:
         raise HTTPException(422, "标题和归档状态不能为空")
-    return _conversation_call("patch", identifier, req.revision, changes)
+    return Conversations.summary(_conversation_call("patch", identifier, req.revision, changes))
 
 
 @app.delete("/api/conversations/{identifier}")

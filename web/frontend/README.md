@@ -1,5 +1,7 @@
 # React + TypeScript + Vite
 
+Easel 的会话摘要、消息分页与浏览器验证见[会话历史说明](../../docs/conversation-history.md)。
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

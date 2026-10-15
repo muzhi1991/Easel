@@ -31,7 +31,9 @@ import {
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import type { SharedTurn } from './lib/api';
-import { loadSharedSessions, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
+import { loadSharedSessions, getSharedSession, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
+
+import { historyEnd, mergeSessionSummary, mergeMessagePage } from './lib/sessionHistory';
 
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
 
@@ -176,6 +178,7 @@ export default function App() {
   // ---- 流式对话：状态与生命周期都放在 App（永不卸载），切页/切 ChatPage 都不中断/丢失 ----
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
   const streamCtl = useRef<Record<string, AbortController>>({});
+  const finishingStreams = useRef(new Set<string>());
   const streamAcc = useRef<Record<string, { content: string; thinking: string; steps: string[]; questions: ChatQuestion[] }>>({});
   const answeredRef = useRef<Set<string>>(new Set());   // 已提交答案的 question id：重放/恢复不再重现
   // ---- 打字机：分批到达的 token 按节奏吐给界面 ----
@@ -187,19 +190,13 @@ export default function App() {
     const knownIds = new Set(sessionsRef.current.map((s) => s.id));
     const incoming = await loadSharedSessions();
     setSessions((prev) => {
-      // Keep unchanged message arrays stable without changing server ordering.
-      // Also compare data: optimistic local edits can share the server revision.
       const previous = new Map(prev.map((item) => [item.id, item]));
-      const shared = incoming.map((item) => {
-        const current = previous.get(item.id);
-        return current?.source === 'server' && current.revision === item.revision
-          && JSON.stringify(current) === JSON.stringify(item)
-          ? current : item;
-      });
+      const shared = incoming.map((item) => mergeSessionSummary(previous.get(item.id), item));
       const byId = new Map(shared.map((item) => [item.id, item]));
       const retained = prev.filter((item) => item.source === 'server' && (
         (!byId.has(item.id) && (!item.revision || !knownIds.has(item.id))) ||
-        (byId.has(item.id) && (item.revision || 0) > (byId.get(item.id)?.revision || 0)) || historyBusy.current.has(item.id) ||
+        (byId.has(item.id) && (item.revision || 0) > (byId.get(item.id)?.revision || 0)) ||
+        (item.id !== forceId && historyBusy.current.has(item.id)) ||
         (item.id !== forceId && !!streamCtl.current[item.id])
       ));
       const keep = new Set(retained.map((item) => item.id));
@@ -217,13 +214,56 @@ export default function App() {
     return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible); };
   }, [historyReady, refreshShared, reportHistoryError]);
 
+  const messageRequests = useRef(new Set<string>());
+  const [messageLoading, setMessageLoading] = useState<Record<string, boolean>>({});
+  const [messageErrors, setMessageErrors] = useState<Record<string, string>>({});
+  const loadMessages = useCallback(async (id: string, older = false) => {
+    const current = sessionsRef.current.find((s) => s.id === id);
+    if (!current || current.source !== 'server' || !current.revision || messageRequests.current.has(id)) return;
+    if (older && (!current.historyLoaded || !current.messageStart)) return;
+    if (!older && (current.optimistic || streamCtl.current[id] || historyBusy.current.has(id))) return;
+    if (!older && current.historyLoaded && historyEnd(current) >= (current.messageCount || 0)) return;
+    const mode = older ? 'older' : current.historyLoaded && current.messages.length ? 'newer' : 'latest';
+    messageRequests.current.add(id);
+    setMessageLoading((p) => ({ ...p, [id]: true }));
+    setMessageErrors((p) => ({ ...p, [id]: '' }));
+    try {
+      const page = await getSharedSession(id, mode === 'latest' ? {} : {
+        ...(older ? { before: current.messageStart } : { after: historyEnd(current) - 1 }),
+        epoch: current.historyEpoch,
+      });
+      setSessions((prev) => prev.map((s) => s.id === id ? mergeMessagePage(s, page, mode) : s));
+    } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        // A retry in another window replaced the indexed history. Restart at
+        // the latest page rather than mixing snapshots or duplicating messages.
+        setSessions((prev) => prev.map((s) => s.id === id && !s.optimistic
+          ? { ...s, messages: [], messageStart: 0, historyLoaded: false } : s));
+      } else {
+        setMessageErrors((p) => ({ ...p, [id]: (error as Error).message }));
+      }
+    } finally {
+      messageRequests.current.delete(id);
+      setMessageLoading((p) => ({ ...p, [id]: false }));
+    }
+  }, []);
+
+  // Home loads summaries only. Selected conversations fetch their latest page,
+  // and later fetch just appended messages when the summary count advances.
+  useEffect(() => {
+    if (currentPage === 'chat' && activeSessionId && !messageErrors[activeSessionId]
+      && !messageLoading[activeSessionId]) void loadMessages(activeSessionId);
+  }, [currentPage, activeSessionId, activeSession?.revision, activeSession?.historyLoaded,
+    activeSession?.messages.length, activeSession?.messageStart, activeSession?.messageCount,
+    messageErrors, messageLoading, loadMessages]);
+
   const updateShared = useCallback(async (id: string, changes: Partial<ChatSession>) => {
     const current = sessionsRef.current.find((item) => item.id === id);
     if (!current || historyBusy.current.has(id)) return;
     historyBusy.current.add(id);
     try {
       const saved = await patchSharedSession(current, changes);
-      setSessions((prev) => prev.map((item) => item.id === id ? saved : item));
+      setSessions((prev) => prev.map((item) => item.id === id ? mergeSessionSummary(item, saved) : item));
       setHistoryError('');
     } catch (error) {
       reportHistoryError(error);
@@ -307,12 +347,32 @@ export default function App() {
     flushTyping(sessionId);
     delete streamCtl.current[sessionId];
     delete streamAcc.current[sessionId];
+    if (sessionsRef.current.find((s) => s.id === sessionId)?.source === 'server') {
+      // Keep the final bubble until its persisted page arrives. Removing it
+      // between two network requests would shrink the thread and steal scroll.
+      finishingStreams.current.add(sessionId);
+      setStreams((prev) => ({ ...prev }));
+      return;
+    }
     setStreams((prev) => {
       const next = { ...prev };
       delete next[sessionId];
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    const settled = [...finishingStreams.current].filter((id) => {
+      const s = sessions.find((item) => item.id === id);
+      return !s || s.historyLoaded && !s.optimistic && !s.pendingTurnId && historyEnd(s) >= (s.messageCount || 0);
+    });
+    if (!settled.length) return;
+    setStreams((prev) => {
+      const next = { ...prev };
+      for (const id of settled) { delete next[id]; finishingStreams.current.delete(id); }
+      return next;
+    });
+  }, [sessions]);
 
   // 启动一次流式（fetch + 累积 + 回调）——只管流，不动消息列表
   const startStream = useCallback((
@@ -428,7 +488,7 @@ export default function App() {
 
   // 刷新/重开页面后按 eventId=0 重放当前 job，再继续实时 tail；旧任务无事件日志时退回最终快照。
   const resumePendingTurn = useCallback((sessionId: string) => {
-    if (streamCtl.current[sessionId] || streamAcc.current[sessionId]) return;  // 本标签正在跑，不插手
+    if (streamCtl.current[sessionId] || streamAcc.current[sessionId] || finishingStreams.current.has(sessionId)) return;
     const s = sessionsRef.current.find((x) => x.id === sessionId);
     const last = s?.messages[s.messages.length - 1];
     if (s?.source === 'server' && !s.pendingTurnId) return;
@@ -538,8 +598,9 @@ export default function App() {
 
   // 活跃会话确定后（含挂载首刷）尝试恢复它悬空的一轮
   useEffect(() => {
-    if (activeSessionId) resumePendingTurn(activeSessionId);
-  }, [activeSessionId, activeSession?.pendingTurnId, resumePendingTurn]);
+    if (currentPage === 'chat' && activeSessionId && (activeSession?.source !== 'server'
+      || activeSession.historyLoaded && historyEnd(activeSession) === activeSession.messageCount)) resumePendingTurn(activeSessionId);
+  }, [currentPage, activeSessionId, activeSession, resumePendingTurn]);
 
   // 落用户消息（可选先把 messages 截断到 truncateAt）→ 启动流。retry/edit 都走这里。
   const sendUserAndStream = useCallback(async (
@@ -554,12 +615,18 @@ export default function App() {
     if ((!agentMessage && attachments.length === 0) || streamCtl.current[sessionId] || historyBusy.current.has(sessionId)) return false;
     let cur = sessionsRef.current.find((s) => s.id === sessionId);
     if (!cur || !historyReady) return false;
+    if (cur.source === 'server' && (!cur.historyLoaded || historyEnd(cur) !== cur.messageCount)) return false;
     if (cur.pendingTurnId) { setHistoryError('此会话正在回复中，请等待完成或先停止。'); return false; }
     historyBusy.current.add(sessionId);
     try {
       if (cur.source === 'server') cur = await ensureSharedSession(cur);
+      const start = cur.messageStart || 0;
+      const absoluteTruncateAt = truncateAt == null ? undefined : start + truncateAt;
       const base = truncateAt != null ? cur.messages.slice(0, truncateAt) : cur.messages;
-      const updated: ChatSession = { ...cur, messages: [...base, {
+      const updated: ChatSession = { ...cur,
+        ...(cur.source === 'server' ? { optimistic: true, messageCount: start + base.length + 1,
+          historyEpoch: (cur.historyEpoch || 0) + (truncateAt == null ? 0 : 1) } : {}),
+        messages: [...base, {
         role: 'user', content: visible,
         ...(attachments.length ? { attachments } : {}),
         ...(legacyAgentText && legacyAgentText !== visible ? { agentContent: legacyAgentText } : {}),
@@ -574,7 +641,7 @@ export default function App() {
       return await startStream(sessionId, agentMessage, cur.persona, attachments, cur.thinking,
         cur.source === 'server' ? {
           conversationId: cur.id, revision: cur.revision!, displayMessage: visible,
-          conversationTitle: updated.title, truncateAt,
+          conversationTitle: updated.title, truncateAt: absoluteTruncateAt,
         } : undefined);
     } catch (error) {
       reportHistoryError(error);
@@ -801,6 +868,9 @@ export default function App() {
             apiDirect={apiDirect}
             key={activeSession.id}
             session={activeSession}
+            historyLoading={!!messageLoading[activeSession.id]}
+            historyError={messageErrors[activeSession.id]}
+            onLoadHistory={(older) => loadMessages(activeSession.id, older)}
             onThinkingChange={(thinking) => {
               if (activeSession.source === 'server') { void updateShared(activeSession.id, { thinking }); return; }
               setSessions((prev) => {
@@ -808,7 +878,9 @@ export default function App() {
               saveSessions(next); return next;
               });
             }}
-            stream={streams[activeSession.id]}
+            stream={finishingStreams.current.has(activeSession.id) && activeSession.historyLoaded
+              && !activeSession.optimistic && !activeSession.pendingTurnId
+              && historyEnd(activeSession) >= (activeSession.messageCount || 0) ? undefined : streams[activeSession.id]}
             onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
             onStop={() => handleStopStream(activeSession.id)}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
@@ -861,7 +933,7 @@ export default function App() {
     if (currentPage !== 'chat') return;
     const cur = sessionsRef.current.find((s) => s.id === activeSessionId);
     if (cur && (cur.persona || '') === persona) return;
-    if (cur && cur.messages.length === 0) {
+    if (cur && (cur.messageCount ?? cur.messages.length) === 0) {
       if (cur.source === 'server' && cur.revision) { void updateShared(cur.id, { persona: persona || undefined }); return; }
       setSessions((prev) => {
         const updated = prev.map((s) =>

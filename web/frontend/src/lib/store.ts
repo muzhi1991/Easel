@@ -17,6 +17,11 @@ export interface ChatSession {
   id: string;
   title: string;
   messages: ChatMessage[];
+  messageCount?: number; // Server total, independent of the loaded window.
+  messageStart?: number; // Absolute index of the first loaded message.
+  historyEpoch?: number; // Changes when retry truncates/replaces history.
+  historyLoaded?: boolean;
+  optimistic?: boolean;
   persona?: string;
   created: number;
   sessionKey?: string;  // OpenClaw 的 session key，用于后端删除
@@ -140,6 +145,10 @@ export function createSession(persona?: string): ChatSession {
     revision: 0,
     title: 'New Chat',
     messages: [],
+    messageCount: 0,
+    messageStart: 0,
+    historyEpoch: 0,
+    historyLoaded: true,
     persona,
     created: Date.now(),
   };

@@ -4,6 +4,7 @@ import MessageBubble from './MessageBubble';
 import QuestionCards from './QuestionCards';
 import BrushEntry from './BrushEntry';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
+import { historyEnd } from '../lib/sessionHistory';
 import { uploadFiles, adoptOversize } from '../lib/api';
 import type { UploadedFile, ThinkingLevel } from '../lib/api';
 import { IconArrowUp, IconStop, IconPlus, IconFile } from './icons';
@@ -11,6 +12,9 @@ import { IconArrowUp, IconStop, IconPlus, IconFile } from './icons';
 interface ChatPageProps {
   apiDirect: boolean;
   session: ChatSession;
+  historyLoading?: boolean;
+  historyError?: string;
+  onLoadHistory?: (older: boolean) => Promise<void>;
   onThinkingChange: (level?: ThinkingLevel) => void;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
   onSend: (displayText: string, attachments?: UploadedFile[]) => Promise<boolean>;
@@ -38,7 +42,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ apiDirect, session, stream, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
+export default function ChatPage({ apiDirect, session, stream, historyLoading = false, historyError, onLoadHistory, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
@@ -50,12 +54,16 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
   const followMessagesRef = useRef(true);
   const touchingMessagesRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  const previousHistoryRef = useRef<{ start: number; offset: number; epoch?: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
 
   const isStreaming = !!stream;
-  const isEmpty = session.messages.length === 0 && !isStreaming;
+  const waitingForHistory = session.source === 'server' && !!session.revision
+    && (!session.historyLoaded || !session.messages.length && (session.messageCount || 0) > 0);
+  const missingLatest = waitingForHistory || (session.source === 'server' && historyEnd(session) < (session.messageCount || 0));
+  const isEmpty = !waitingForHistory && session.messages.length === 0 && !isStreaming;
 
   useEffect(() => {
     fetch('/api/upload/limits').then((r) => r.json())
@@ -103,13 +111,29 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
 
   useLayoutEffect(() => {
     const el = messagesRef.current;
+    const thread = threadRef.current;
+    const previous = previousHistoryRef.current;
+    const start = session.messageStart || 0;
+    if (el && thread && previous && previous.epoch === session.historyEpoch && start <= previous.start) {
+      const anchor = thread.querySelector<HTMLElement>(`[data-message-index="${previous.start}"]`);
+      if (anchor) {
+        // Anchor to the old first message, independent of concurrent tail growth
+        // or scrolling while the request was in flight. Native anchoring is off.
+        el.scrollTop += anchor.getBoundingClientRect().top - thread.getBoundingClientRect().top - previous.offset;
+        lastScrollTopRef.current = el.scrollTop;
+      }
+    }
+    if (previous && previous.epoch !== session.historyEpoch) followMessagesRef.current = true;
+    const first = thread?.querySelector<HTMLElement>('[data-message-index]');
+    previousHistoryRef.current = first && thread
+      ? { start, offset: first.getBoundingClientRect().top - thread.getBoundingClientRect().top, epoch: session.historyEpoch } : null;
     // Instant, container-only scrolling avoids queued smooth animations fighting
     // wheel/touch input and avoids moving the outer page on mobile.
     if (el && followMessagesRef.current) {
       el.scrollTop = el.scrollHeight;
       lastScrollTopRef.current = el.scrollTop;
     }
-  }, [session.messages, stream?.content, stream?.thinking, stream?.activity, stream?.stillWorking, isEmpty]);
+  }, [session.messages, stream?.content, stream?.thinking, stream?.activity, stream?.stillWorking, isEmpty, waitingForHistory, session.messageStart, session.historyEpoch, historyLoading, historyError]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -125,7 +149,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
     observer.observe(el);
     observer.observe(thread);
     return () => observer.disconnect();
-  }, [isEmpty]);
+  }, [isEmpty, waitingForHistory]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -137,7 +161,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
 
   const handleSend = async () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting) return;
+    if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting || missingLatest) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     setSubmitting(true);
     followMessagesRef.current = true;
@@ -204,12 +228,19 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
         {isStreaming ? (
           <button className="send-btn" onClick={onStop} title="停止生成"><IconStop size={15} /></button>
         ) : (
-          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || submitting} title="发送"><IconArrowUp size={17} /></button>
+          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading || submitting || missingLatest} title="发送"><IconArrowUp size={17} /></button>
         )}
       </div>
       <div className="composer-hint">{isStreaming ? '生成中…' : 'Enter 发送 · Shift+Enter 换行'}</div>
     </div>
   );
+
+  if (waitingForHistory) {
+    return <div className="chat-page"><div className="chat-history-status" role="status">
+      {historyError || '正在加载消息…'}
+      {historyError && <button className="btn btn-sm" onClick={() => onLoadHistory?.(false)}>重试</button>}
+    </div></div>;
+  }
 
   // ---- 空态：居中欢迎页 ----
   if (isEmpty) {
@@ -259,6 +290,10 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
             else if (el.scrollTop < lastScrollTopRef.current) followMessagesRef.current = false;
           }
           lastScrollTopRef.current = el.scrollTop;
+          if (el.scrollTop < 80 && session.messageStart && !historyLoading && !historyError) {
+            followMessagesRef.current = false;
+            void onLoadHistory?.(true);
+          }
         }}
         onWheel={(event) => { if (event.deltaY < 0) followMessagesRef.current = false; }}
         onTouchStart={() => {
@@ -273,6 +308,13 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
         }}
         onTouchCancel={() => { touchingMessagesRef.current = false; }}>
         <div className="chat-thread" ref={threadRef}>
+          {(!!session.messageStart || historyError || missingLatest) && <div className="chat-history-controls" role="status">
+            {historyError && <span>{historyError}</span>}
+            <button className="btn btn-sm" disabled={historyLoading} onClick={() => {
+              followMessagesRef.current = false;
+              void onLoadHistory?.(!missingLatest);
+            }}>{historyLoading ? '正在加载…' : historyError ? '重试加载消息' : missingLatest ? '加载新消息' : '加载更早消息'}</button>
+          </div>}
           {displayMessages.map((msg, i) => {
             const isLast = i === displayMessages.length - 1;
             const live = isStreaming && isLast && msg.role === 'assistant';
@@ -288,7 +330,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
                   onRetry: isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
-                  canModify: !isStreaming,
+                  canModify: !isStreaming && !missingLatest,
                 };
               } else {
                 const pi = i - 1;
@@ -298,13 +340,13 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
                   onRetry: (isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,
-                  canModify: !isStreaming,
+                  canModify: !isStreaming && !missingLatest,
                 };
               }
             }
             return (
+              <div key={`${(session.messageStart || 0) + i}-${msg.role}`} data-message-index={(session.messageStart || 0) + i}>
               <MessageBubble
-                key={`${i}-${msg.role}`}
                 message={msg}
                 isStreaming={live}
                 thinking={live ? stream!.thinking : ''}
@@ -312,6 +354,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
                 stillWorking={live ? stream!.stillWorking : ''}
                 actions={actions}
               />
+              </div>
             );
           })}
           {isStreaming && (stream!.questions?.length ?? 0) > 0 && (
