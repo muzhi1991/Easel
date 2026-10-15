@@ -1,5 +1,5 @@
 import ChatModelControls from './ChatModelControls';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import QuestionCards from './QuestionCards';
 import BrushEntry from './BrushEntry';
@@ -45,7 +45,11 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [maxMb, setMaxMb] = useState(50);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const followMessagesRef = useRef(true);
+  const touchingMessagesRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -97,9 +101,31 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
   };
   const removeAttachment = (path: string) => setAttachments((a) => a.filter((x) => x.path !== path));
 
-  useEffect(() => {
-    if (!isEmpty) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  useLayoutEffect(() => {
+    const el = messagesRef.current;
+    // Instant, container-only scrolling avoids queued smooth animations fighting
+    // wheel/touch input and avoids moving the outer page on mobile.
+    if (el && followMessagesRef.current) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+    }
   }, [session.messages, stream?.content, stream?.thinking, stream?.activity, stream?.stillWorking, isEmpty]);
+
+  useEffect(() => {
+    const el = messagesRef.current;
+    const thread = threadRef.current;
+    if (!el || !thread) return;
+    // Images and the mobile keyboard can change geometry without new messages.
+    const observer = new ResizeObserver(() => {
+      if (followMessagesRef.current) {
+        el.scrollTop = el.scrollHeight;
+        lastScrollTopRef.current = el.scrollTop;
+      }
+    });
+    observer.observe(el);
+    observer.observe(thread);
+    return () => observer.disconnect();
+  }, [isEmpty]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -114,6 +140,7 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
     if ((!trimmed && attachments.length === 0) || isStreaming || uploading || submitting) return;
     // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
     setSubmitting(true);
+    followMessagesRef.current = true;
     try {
       if (await onSend(trimmed, attachments)) {
         setInput((current) => current.trim() === trimmed ? '' : current);
@@ -220,8 +247,32 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
 
   return (
     <div className="chat-page">
-      <div className="chat-messages">
-        <div className="chat-thread">
+      <div className="chat-messages" ref={messagesRef}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          // Only resume at the bottom (with rounding tolerance), so small
+          // upward movements cannot be swallowed by the next streaming token.
+          if (!touchingMessagesRef.current) {
+            if (el.scrollHeight - el.clientHeight - el.scrollTop <= 2) followMessagesRef.current = true;
+            // Content/viewport resizing can emit scroll events too. Only an
+            // upward movement should cancel following, not a new bottom gap.
+            else if (el.scrollTop < lastScrollTopRef.current) followMessagesRef.current = false;
+          }
+          lastScrollTopRef.current = el.scrollTop;
+        }}
+        onWheel={(event) => { if (event.deltaY < 0) followMessagesRef.current = false; }}
+        onTouchStart={() => {
+          // Pause before the browser crosses its native touch-scroll threshold.
+          touchingMessagesRef.current = true;
+          followMessagesRef.current = false;
+        }}
+        onTouchEnd={(event) => {
+          touchingMessagesRef.current = false;
+          const el = event.currentTarget;
+          followMessagesRef.current = el.scrollHeight - el.clientHeight - el.scrollTop <= 2;
+        }}
+        onTouchCancel={() => { touchingMessagesRef.current = false; }}>
+        <div className="chat-thread" ref={threadRef}>
           {displayMessages.map((msg, i) => {
             const isLast = i === displayMessages.length - 1;
             const live = isStreaming && isLast && msg.role === 'assistant';
@@ -266,7 +317,6 @@ export default function ChatPage({ apiDirect, session, stream, onThinkingChange,
           {isStreaming && (stream!.questions?.length ?? 0) > 0 && (
             <QuestionCards questions={stream!.questions || []} onDone={(qid) => onQuestionAnswered?.(qid)} />
           )}
-          <div ref={messagesEndRef} />
         </div>
       </div>
 

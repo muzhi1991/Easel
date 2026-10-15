@@ -185,8 +185,17 @@ export default function App() {
 
   const refreshShared = useCallback(async (forceId?: string) => {
     const knownIds = new Set(sessionsRef.current.map((s) => s.id));
-    const shared = await loadSharedSessions();
+    const incoming = await loadSharedSessions();
     setSessions((prev) => {
+      // Keep unchanged message arrays stable without changing server ordering.
+      // Also compare data: optimistic local edits can share the server revision.
+      const previous = new Map(prev.map((item) => [item.id, item]));
+      const shared = incoming.map((item) => {
+        const current = previous.get(item.id);
+        return current?.source === 'server' && current.revision === item.revision
+          && JSON.stringify(current) === JSON.stringify(item)
+          ? current : item;
+      });
       const byId = new Map(shared.map((item) => [item.id, item]));
       const retained = prev.filter((item) => item.source === 'server' && (
         (!byId.has(item.id) && (!item.revision || !knownIds.has(item.id))) ||
