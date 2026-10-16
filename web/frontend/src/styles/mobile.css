@@ -26,10 +26,12 @@
   .navigation-shell {
     display: block; position: fixed; inset: 0 auto 0 0; z-index: 51;
     width: min(320px, calc(100vw - 48px)); height: var(--app-height, 100dvh);
-    background: var(--sidebar-bg, var(--surface)); visibility: hidden; transform: translateX(-100%);
+    /* Keep asynchronously inserted history paintable while the drawer is closed.
+       ResponsiveShell also makes the closed drawer inert. */
+    background: var(--sidebar-bg, var(--surface)); opacity: 0; pointer-events: none; transform: translateX(-100%);
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
   }
-  .navigation-shell.is-open { visibility: visible; transform: none; box-shadow: var(--shadow-lg); }
+  .navigation-shell.is-open { opacity: 1; pointer-events: auto; transform: none; box-shadow: var(--shadow-lg); }
   .navigation-shell .sidebar { width: 100%; min-width: 0; }
   .mobile-nav-backdrop { position: fixed; inset: 0; z-index: 50; border: 0; background: rgba(18,22,35,.4); }
   .mobile-nav-close { display: flex; position: absolute; top: calc(9px + env(safe-area-inset-top)); right: 8px; z-index: 1; }
