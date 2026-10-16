@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { artifactFromUrl, fitArtifact, mergeArtifacts } from '../lib/artifacts';
 import { fetchArtifactArchive, mediaUrl } from '../lib/api';
 import type { Artifact } from '../lib/artifacts';
+import ImageDownload from './ImageDownload';
 import { IconChevron, IconOutputs } from './icons';
 
 function HtmlArtifact({ artifact }: { artifact: Artifact }) {
@@ -126,7 +127,8 @@ export default function ArtifactGallery({ artifacts, archives }: { artifacts: Ar
       <div className="artifact-footer">
         <span className="artifact-name" title={artifact.name}>{artifact.name}</span>
         <a href={artifact.url} target="_blank" rel="noreferrer">打开 ↗</a>
-        <a href={artifact.url} download={artifact.name}>下载</a>
+        {artifact.kind === 'image' ? <ImageDownload key={artifact.url} artifact={artifact} />
+          : <a href={artifact.url} download={artifact.name}>下载</a>}
       </div>
     </section>
   );

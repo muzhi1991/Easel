@@ -11,7 +11,7 @@ const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 });
 const exports = {};
-runInNewContext(outputText, { exports });
+runInNewContext(outputText, { exports, URL });
 const { artifactFromUrl, archiveFromUrl, mergeArtifacts, fitArtifact } = exports;
 
 test('local media types are recognized without converting text reports or external links', () => {
@@ -132,4 +132,13 @@ test('multiple artifact arrows and keyboard controls wrap around without losing 
   buttons = view.buttons(view.render());
   buttons.find(button => button.props['aria-label'] === '上一个产物').props.onClick();
   assert.equal(view.selected(), 2);
+});
+
+ test('inline remote images receive gallery actions without treating arbitrary links as images', () => {
+  const image = exports.artifactFromImageUrl('https://cdn.example.test/render?id=1');
+  assert.equal(image.kind, 'image');
+  assert.equal(image.url, 'https://cdn.example.test/render?id=1');
+  assert.equal(exports.artifactFromImageUrl('javascript:alert(1)'), null);
+  assert.equal(exports.artifactFromImageUrl('data:text/html,bad'), null);
+  assert.equal(mergeArtifacts([image], [exports.artifactFromImageUrl('https://cdn.example.test/render?id=2')]).length, 2);
 });

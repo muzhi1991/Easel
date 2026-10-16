@@ -1529,3 +1529,12 @@ textarea.field { resize: vertical; min-height: 90px; }
 
 .chat-history-status { margin: auto; display: flex; align-items: center; gap: 12px; color: var(--text-secondary); }
 .chat-history-controls { min-height: 44px; display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--text-secondary); flex-wrap: wrap; }
+
+/* Keep image saving visible and touchable, including in installed mobile apps. */
+.artifact-footer { flex-wrap: wrap; }
+.image-download { flex-basis: 100%; }
+.image-download-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.image-download button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
+.image-download button:first-child { background: var(--accent-start); color: white; }
+.image-download button:disabled { opacity: .6; cursor: wait; }
+.image-download p { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
