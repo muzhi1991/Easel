@@ -32,6 +32,26 @@ export function artifactFromUrl(url: string): Artifact | null {
   }
 }
 
+/** Only call for actual img elements; arbitrary remote links are not media. */
+export function artifactFromImageUrl(url: string): Artifact | null {
+  const local = artifactFromUrl(url);
+  if (local) return local.kind === 'image' ? local : null;
+  if (hasUnsafeCharacters(url)) return null;
+  try {
+    const parsed = new URL(url.startsWith('//') ? `https:${url}` : url);
+    if (!['https:', 'http:'].includes(parsed.protocol)) return null;
+    let name = parsed.pathname.split('/').at(-1) || 'image';
+    try { name = decodeURIComponent(name); } catch { /* Keep encoded name. */ }
+    return { url: parsed.href, name, kind: 'image' };
+  } catch { return null; }
+}
+
+function artifactKey(url: string): string {
+  // Remote query strings may identify entirely different generated images.
+  if (!url.startsWith('/api/media/')) return url;
+  return decodeURIComponent(url.split(/[?#]/)[0]);
+}
+
 export function extractArtifacts(html: string): { html: string; artifacts: Artifact[]; archives: string[] } {
   const document = new DOMParser().parseFromString(html, 'text/html');
   const artifacts: Artifact[] = [];
@@ -41,9 +61,9 @@ export function extractArtifacts(html: string): { html: string; artifacts: Artif
     const url = element.getAttribute(element.tagName === 'IMG' ? 'src' : 'href') || '';
     const archive = archiveFromUrl(url);
     if (archive && !archives.includes(archive)) archives.push(archive);
-    const artifact = artifactFromUrl(url);
+    const artifact = element.tagName === 'IMG' ? artifactFromImageUrl(url) : artifactFromUrl(url);
     if (!artifact) continue;
-    const key = decodeURIComponent(artifact.url.split(/[?#]/)[0]);
+    const key = artifactKey(artifact.url);
     if (!seen.has(key)) {
       seen.add(key);
       artifacts.push(artifact);
@@ -78,7 +98,7 @@ export function archiveFromUrl(url: string): string | null {
 export function mergeArtifacts(...groups: Artifact[][]): Artifact[] {
   const seen = new Set<string>();
   return groups.flat().filter(artifact => {
-    const key = decodeURIComponent(artifact.url.split(/[?#]/)[0]);
+    const key = artifactKey(artifact.url);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
