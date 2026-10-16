@@ -1,0 +1,100 @@
+name: Dev CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install --prefer-binary -e . -e integrations/media-adapters pytest
+      - run: python scripts/validate_skills.py
+      - run: python scripts/validate_skill_commands.py
+      - run: python scripts/validate_document_paths.py
+      - run: python -m pytest -q -o faulthandler_timeout=90
+
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: npm ci
+        working-directory: web/frontend
+      - run: npm run lint
+        working-directory: web/frontend
+      - run: node --test tests/frontend/*.test.mjs
+      - run: npm run build
+        working-directory: web/frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-${{ github.sha }}
+          path: web/frontend/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package (no deployment)
+    needs: [checks, frontend]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-${{ github.sha }}
+          path: web/frontend/dist/
+      - run: python scripts/build_deployment_bundle.py --output-dir release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easel-dev-${{ github.sha }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Download instructions
+        env:
+          COMMIT: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "### Deployment bundle ready (not deployed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Contains committed source and prebuilt browser assets; no virtualenv or local credentials.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Download: gh run download $RUN_ID --repo $REPOSITORY -n easel-dev-$COMMIT" >> "$GITHUB_STEP_SUMMARY"

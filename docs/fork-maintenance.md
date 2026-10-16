@@ -74,3 +74,13 @@ git merge --no-ff upstream/main
 - 每次修改后提交到相应分支，推自己的 fork；`main` 保持官方原样。
 
 媒体接线、迁移及真实识别验证详见 [media-adapters.md](media-adapters.md)。共享 OpenClaw 的旧 GLM user-text 补丁已撤销，不在任何升级步骤中重新应用。
+
+## dev CI 与部署包
+
+`Dev CI` 在推送 `dev`、向 `dev` 提交 PR 或手动触发时运行。Linux 和 macOS 执行 Python 测试与维护校验；Linux 构建前端并运行前端测试。PR 只检查，不生成完整部署包；推送和手动运行在所有检查通过后生成 `easel-dev-<完整提交号>` artifact，保留30天。临时前端 artifact 保留7天。
+
+在 GitHub Actions 的对应运行页面下载部署包 artifact，里面包含 `easel-dev-<短提交号>.tar.gz` 和 `SHA256SUMS`。也可使用运行摘要中的 `gh run download` 命令下载。Mac 上用 `shasum -a 256 -c SHA256SUMS` 校验，然后解压到独立目录检查；包内 `BUILD-INFO.json` 记录提交号和前端文件校验值。
+
+部署包包括该提交的 Git 跟踪文件和预构建的前端资源，适用于 macOS。它不是独立可执行程序，不包含 Python 虚拟环境、Node 依赖、模型权重、用户目录配置或未跟踪文件。部署时仍需在目标 Mac 安装 Python 依赖和本地媒体适配包；配置与会话数据保留在原位置。不要把整份归档直接覆盖运行目录。
+
+此工作流仅检查、打包和上传，不连接本地机器、不配置 SSH 或自托管 runner、不部署、不重启服务。产物准备好不代表运行版本已经更新；实际部署另按维护窗口安排。`main` 原有 CI 与定时任务保持不变。
