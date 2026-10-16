@@ -8,6 +8,10 @@ import subprocess
 import tarfile
 
 
+# Promotional material is not used by the React app or runtime skills.
+EXCLUDED_PATHS = ('assets/readme', 'web/static/showcase', 'web/static/main.html')
+
+
 def build(root: Path, output: Path) -> Path:
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     dist = root / 'web/frontend/dist'
@@ -23,11 +27,15 @@ def build(root: Path, output: Path) -> Path:
     metadata = {
         'commit': commit,
         'format': 1,
+        'excluded_paths': list(EXCLUDED_PATHS),
         'contents': 'Committed source and browser assets; install Python dependencies on the target OS.',
         'frontend_sha256': {str(p.relative_to(dist)): hashlib.sha256(p.read_bytes()).hexdigest() for p in assets},
     }
     with tarfile.open(fileobj=io.BytesIO(source)) as tracked, tarfile.open(target, 'w:gz') as bundle:
         for member in tracked:
+            relative = member.name.removeprefix('easel/').rstrip('/')
+            if any(relative == path or relative.startswith(path + '/') for path in EXCLUDED_PATHS):
+                continue
             bundle.addfile(member, tracked.extractfile(member) if member.isfile() else None)
         for path in assets:
             bundle.add(path, arcname='easel/web/frontend/dist/' + path.relative_to(dist).as_posix())
