@@ -34,6 +34,7 @@ def test_http_completion_uses_own_stream(ending, expected_note, clean, raw_order
     monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
     monkeypatch.setattr(web, 'SHARED_RAW_STREAM', raw)
     monkeypatch.setattr(web, '_direct_api_enabled', lambda: False)
+    monkeypatch.setattr(web, '_harness_settings', lambda: {'runtime': 'openclaw'})
     monkeypatch.setattr(web, '_heal_openclaw_session', lambda sk: None)
     monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
     monkeypatch.setattr(web, '_resolve_transport', lambda sk: 'http')
