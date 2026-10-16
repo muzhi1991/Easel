@@ -5,6 +5,7 @@ import { linkifyOutputs, externalizeMediaLinks } from '../lib/linkifyOutputs';
 import { IconCopy, IconCheck, IconRetry } from './icons';
 import { extractArtifacts } from '../lib/artifacts';
 import ArtifactGallery from './ArtifactGallery';
+import MessageAttachments from './MessageAttachments';
 
 export interface BubbleActions {
   onCopy: () => void;
@@ -54,13 +55,15 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
 
   // ---- 用户消息 ----
   if (message.role === 'user') {
-    // Attachment-only turns are intentionally invisible; the structured refs
-    // remain in session state for retry but never leak paths into the chat UI.
-    if (!message.content.trim()) return null;
+    const attachments = message.attachments || [];
+    if (!message.content.trim() && !attachments.length) return null;
     return (
       <div className="message-row user">
         <div className="msg-col user">
-          <div className="message-bubble user">{message.content}</div>
+          <div className={`message-bubble user${attachments.length ? ' has-attachments' : ''}`}>
+            {message.content.trim() && <div>{message.content}</div>}
+            {attachments.length > 0 && <MessageAttachments files={attachments} />}
+          </div>
           {actions && <ActionBar actions={actions} />}
         </div>
       </div>

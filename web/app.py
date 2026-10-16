@@ -4409,6 +4409,7 @@ async def api_output(path: str):
         return {"path": path, "content": "", "kind": "binary", "isBinary": True}
 
 
+@app.head("/api/media/{path:path}")
 @app.get("/api/media/{path:path}")
 async def api_media(path: str):
     """原样输出媒体文件（图片/视频/音频/HTML/PDF），供 <img>/<video>/iframe/下载。"""
