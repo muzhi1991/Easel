@@ -22,7 +22,7 @@ def run_launcher(tmp_path, settings, public_url=None):
     (bin_dir / 'ipconfig').write_text('#!/bin/sh\nprintf "192.168.31.200\\n"\n')
     (bin_dir / 'ipconfig').chmod(0o755)
     env = {**os.environ, 'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'],
-           'PYTHONPATH': str(ROOT), 'EASEL_EXTRA_HOSTS': 'existing.test',
+           'PYTHONPATH': str(ROOT), 'EASEL_AGENT_RUNTIME': 'api', 'EASEL_EXTRA_HOSTS': 'existing.test',
            'EASEL_EXTRA_ORIGINS': 'https://existing.test'}
     env.pop('EASEL_PUBLIC_URL', None)
     if public_url is not None:

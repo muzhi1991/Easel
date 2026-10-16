@@ -96,3 +96,9 @@ EASEL_PUBLIC_URL=https://your-domain.example:8443
 该值必须是完整的 HTTP/HTTPS origin，可带端口，不含账号、业务路径或查询参数；末尾 `/` 可省略。进程环境变量优先于 `.env`，未配置或留空时只添加局域网地址。脚本将域名和 origin 加入访问允许列表，保留已有 `EASEL_EXTRA_HOSTS` / `EASEL_EXTRA_ORIGINS`；不执行 `.env` 中的 shell 命令。HTTPS 证书和 TLS 仍由 Caddy 等反向代理处理。
 
 以后部署及自启均应直接调用仓库根目录的 `start-web-lan.sh`，不再依赖 outputs 里的实例包装脚本。旧包装脚本在切换启动入口前可以继续调用统一脚本；配置修改需下次启动才生效。`.env` 仍不提交，仓库仅提交空值配置示例。
+
+### macOS 登录自启与专用网关
+
+LaunchAgent 使用项目根目录的 `start-web-lan.sh` 作为统一入口。入口按当前 Agent 设置，仅在使用 OpenClaw 时先调用 `scripts/gateway.sh start`，复用已经健康的 `easel` profile 网关，并确认健康检查通过后启动 Web；不会启动或停止默认 OpenClaw profile。非交互启动自动查找 NVM 等位置的命令。网关启动失败时入口退出，由 LaunchAgent 的 KeepAlive 重试。
+
+实例的 LaunchAgent plist 位于用户 `~/Library/LaunchAgents/`，不提交 Git。它属于登录后自启，非登录前的系统服务。Web 与专用网关由同一入口启动；网关仍按既有脚本在后台运行，关闭 Web 不会主动停止网关。部署后使用 `launchctl kickstart -k gui/$(id -u)/com.limuzhi.easel` 重启托管服务前，先确认没有生成中的会话；不要另起一份 Web 进程。日志在实例配置指定的 `~/Library/Logs/Easel/` 和 `/tmp/easel-gateway.log`。
