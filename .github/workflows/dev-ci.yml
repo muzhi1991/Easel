@@ -35,7 +35,11 @@ jobs:
       - run: python scripts/validate_skills.py
       - run: python scripts/validate_skill_commands.py
       - run: python scripts/validate_document_paths.py
-      - run: python -m pytest -q -o faulthandler_timeout=90
+      # Both trees contain a tests package; isolate collection without dropping skill tests.
+      - name: Core tests
+        run: python -m pytest tests/ -q -o faulthandler_timeout=90
+      - name: Skill tests
+        run: python -m pytest skills/ -q -o faulthandler_timeout=90
 
   frontend:
     name: Build frontend
