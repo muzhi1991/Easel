@@ -1538,3 +1538,22 @@ textarea.field { resize: vertical; min-height: 90px; }
 .image-download button:first-child { background: var(--accent-start); color: white; }
 .image-download button:disabled { opacity: .6; cursor: wait; }
 .image-download p { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+
+/* User attachments remain part of their original message when revisiting history. */
+.msg-col.user { min-width: 0; }
+.message-bubble.user.has-attachments { width: min(560px, 100%); box-sizing: border-box; }
+.message-attachments { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; margin-top: 8px; }
+.message-attachments:first-child { margin-top: 0; }
+.message-attachment { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); }
+.message-attachment-name { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.message-attachment-name svg { flex-shrink: 0; }
+.message-attachment-name span { min-width: 0; overflow-wrap: anywhere; }
+.message-attachment-preview:empty { display: none; }
+.message-attachment-preview { margin-top: 8px; }
+.message-attachment-preview img, .message-attachment-preview video { display: block; width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; }
+.message-attachment-preview video { background: #17191d; }
+.message-attachment-preview audio { display: block; width: 100%; min-width: 0; }
+.message-attachment-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.message-attachment-actions a, .message-attachment-hint button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px; color: var(--accent-start); text-decoration: underline; }
+.message-attachment-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary); }
+.message-attachment-hint button { border: 0; background: transparent; cursor: pointer; font: inherit; }
