@@ -81,6 +81,6 @@ git merge --no-ff upstream/main
 
 在 GitHub Actions 的对应运行页面下载部署包 artifact，里面包含 `easel-dev-<短提交号>.tar.gz` 和 `SHA256SUMS`。也可使用运行摘要中的 `gh run download` 命令下载。Mac 上用 `shasum -a 256 -c SHA256SUMS` 校验，然后解压到独立目录检查；包内 `BUILD-INFO.json` 记录提交号和前端文件校验值。
 
-部署包包括该提交的 Git 跟踪文件和预构建的前端资源，适用于 macOS。它不是独立可执行程序，不包含 Python 虚拟环境、Node 依赖、模型权重、用户目录配置或未跟踪文件。部署时仍需在目标 Mac 安装 Python 依赖和本地媒体适配包；配置与会话数据保留在原位置。不要把整份归档直接覆盖运行目录。
+部署包包括该提交的运行源码和预构建的前端资源，适用于 macOS。打包时排除纯宣传素材 `assets/readme/`、`web/static/showcase/` 及对应宣传页 `web/static/main.html`；这些文件仍保留在 Git 中，但部署包不提供该宣传页。应用图标、PWA 资源、技能字体等运行资源保留，排除清单记录在 `BUILD-INFO.json` 中。它不是独立可执行程序，不包含 Python 虚拟环境、Node 依赖、模型权重、用户目录配置或未跟踪文件。部署时仍需在目标 Mac 安装 Python 依赖和本地媒体适配包；配置与会话数据保留在原位置。不要把整份归档直接覆盖运行目录。
 
 此工作流仅检查、打包和上传，不连接本地机器、不配置 SSH 或自托管 runner、不部署、不重启服务。产物准备好不代表运行版本已经更新；实际部署另按维护窗口安排。`main` 原有 CI 与定时任务保持不变。

@@ -15,7 +15,13 @@ def test_bundle_uses_commit_not_local_secrets(tmp_path):
     git('init')
     (tmp_path / 'app.py').write_text('committed source')
     (tmp_path / '.env.example').write_text('API_KEY=')
-    git('add', 'app.py', '.env.example')
+    demo_paths = ['assets/readme/videos/demo.mp4', 'web/static/showcase/demo.mp4', 'web/static/main.html']
+    runtime_paths = ['web/static/easel-icon-transparent.png', 'skills/example/assets/font.ttf']
+    for name in demo_paths + runtime_paths:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'asset')
+    git('add', '.')
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture')
     (tmp_path / 'app.py').write_text('dirty source')
     (tmp_path / '.env').write_text('PRIVATE_KEY=must-not-package')
@@ -28,6 +34,8 @@ def test_bundle_uses_commit_not_local_secrets(tmp_path):
     bundle = module.build(tmp_path, output)
     with tarfile.open(bundle) as archive:
         assert archive.extractfile('easel/app.py').read() == b'committed source'
+        assert all('easel/' + name not in archive.getnames() for name in demo_paths)
+        assert all('easel/' + name in archive.getnames() for name in runtime_paths)
         assert 'easel/.env' not in archive.getnames()
         assert 'easel/user-config.json' not in archive.getnames()
         assert archive.extractfile('easel/web/frontend/dist/index.html').read() == b'built asset'
