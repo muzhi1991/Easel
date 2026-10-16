@@ -13,6 +13,13 @@ import app as web
 from easel.gateway_questions import GatewayClient
 
 
+@pytest.fixture(autouse=True)
+def openclaw_runtime(monkeypatch):
+    # These tests exercise OpenClaw, regardless of installed CLIs on the runner.
+    monkeypatch.setattr(web, "_harness_settings", lambda: {"runtime": "openclaw"})
+    monkeypatch.setattr(web, "openclaw_base_cmd", lambda: ["oc"])
+
+
 def test_default_prefers_saved_config_and_rereads_changes(tmp_path, monkeypatch):
     cfg = tmp_path / 'openclaw.json'
     monkeypatch.setattr(web, '_oc_config_path', lambda: cfg)

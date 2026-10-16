@@ -201,6 +201,7 @@ def test_web_video_defaults_and_legacy_switch(tmp_path, monkeypatch):
     rt, p, r = setup(tmp_path)
     monkeypatch.setattr(web, '_media_runtime', lambda: rt)
     monkeypatch.setattr(web, '_read_env', lambda: {'VIDEO_PROVIDER': 'ark'})
+    monkeypatch.setattr(web, '_direct_api_enabled', lambda: False)
     monkeypatch.setattr(web, '_oc_config_path', lambda: tmp_path / 'no-openclaw.json')
     assert all(row['role'] == '备' for row in web._model_channels()['channels']['video']['rows'])
     updates = []
