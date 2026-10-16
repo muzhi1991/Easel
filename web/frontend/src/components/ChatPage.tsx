@@ -180,6 +180,8 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
     // 输入法确认候选词/英文的回车交给输入法处理，不能触发发送。
     // 部分浏览器先触发 compositionend，此时仍需用 229 识别输入法按键。
     if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    // Touch devices use the keyboard Return key for newlines; send via the arrow.
+    if (window.matchMedia('(pointer: coarse)').matches) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
