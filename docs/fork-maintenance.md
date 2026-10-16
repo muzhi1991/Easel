@@ -84,3 +84,15 @@ git merge --no-ff upstream/main
 部署包包括该提交的运行源码和预构建的前端资源，适用于 macOS。打包时排除纯宣传素材 `assets/readme/`、`web/static/showcase/` 及对应宣传页 `web/static/main.html`；这些文件仍保留在 Git 中，但部署包不提供该宣传页。应用图标、PWA 资源、技能字体等运行资源保留，排除清单记录在 `BUILD-INFO.json` 中。它不是独立可执行程序，不包含 Python 虚拟环境、Node 依赖、模型权重、用户目录配置或未跟踪文件。部署时仍需在目标 Mac 安装 Python 依赖和本地媒体适配包；配置与会话数据保留在原位置。不要把整份归档直接覆盖运行目录。
 
 此工作流仅检查、打包和上传，不连接本地机器、不配置 SSH 或自托管 runner、不部署、不重启服务。产物准备好不代表运行版本已经更新；实际部署另按维护窗口安排。`main` 原有 CI 与定时任务保持不变。
+
+## 统一 Web 启动入口
+
+macOS 本机统一使用 `bash start-web-lan.sh`，同时允许局域网访问和可选的反向代理域名访问。域名放在本机未跟踪的 `.env` 中：
+
+```dotenv
+EASEL_PUBLIC_URL=https://your-domain.example:8443
+```
+
+该值必须是完整的 HTTP/HTTPS origin，可带端口，不含账号、业务路径或查询参数；末尾 `/` 可省略。进程环境变量优先于 `.env`，未配置或留空时只添加局域网地址。脚本将域名和 origin 加入访问允许列表，保留已有 `EASEL_EXTRA_HOSTS` / `EASEL_EXTRA_ORIGINS`；不执行 `.env` 中的 shell 命令。HTTPS 证书和 TLS 仍由 Caddy 等反向代理处理。
+
+以后部署及自启均应直接调用仓库根目录的 `start-web-lan.sh`，不再依赖 outputs 里的实例包装脚本。旧包装脚本在切换启动入口前可以继续调用统一脚本；配置修改需下次启动才生效。`.env` 仍不提交，仓库仅提交空值配置示例。
