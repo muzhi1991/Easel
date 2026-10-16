@@ -1530,14 +1530,7 @@ textarea.field { resize: vertical; min-height: 90px; }
 .chat-history-status { margin: auto; display: flex; align-items: center; gap: 12px; color: var(--text-secondary); }
 .chat-history-controls { min-height: 44px; display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--text-secondary); flex-wrap: wrap; }
 
-/* Keep image saving visible and touchable, including in installed mobile apps. */
 .artifact-footer { flex-wrap: wrap; }
-.image-download { flex-basis: 100%; }
-.image-download-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.image-download button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
-.image-download button:first-child { background: var(--accent-start); color: white; }
-.image-download button:disabled { opacity: .6; cursor: wait; }
-.image-download p { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
 
 /* User attachments remain part of their original message when revisiting history. */
 .msg-col.user { min-width: 0; }
@@ -1557,3 +1550,11 @@ textarea.field { resize: vertical; min-height: 90px; }
 .message-attachment-actions a, .message-attachment-hint button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px; color: var(--accent-start); text-decoration: underline; }
 .message-attachment-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary); }
 .message-attachment-hint button { border: 0; background: transparent; cursor: pointer; font: inherit; }
+
+.download-control { flex-basis: 100%; width: 100%; min-width: 0; font-size: 12px; }
+.download-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.download-actions button, .download-actions a { min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; cursor: pointer; text-decoration: none; }
+.download-actions button:first-child { border-color: var(--accent-start); }
+.download-control p { margin: 8px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.download-progress { display: grid; gap: 4px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.download-progress progress { width: 100%; height: 8px; accent-color: var(--accent-start); }

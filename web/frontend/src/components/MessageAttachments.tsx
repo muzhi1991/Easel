@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { UploadedFile } from '../lib/api';
 import { mediaUrl } from '../lib/api';
 import { IconFile } from './icons';
+import DownloadControl from './DownloadControl';
 
 function Attachment({ file }: { file: UploadedFile }) {
   const card = useRef<HTMLDivElement>(null);
@@ -57,7 +58,7 @@ function Attachment({ file }: { file: UploadedFile }) {
       </p>}
       <div className="message-attachment-actions">
         <a href={url} target="_blank" rel="noreferrer">{kind === 'image' ? '查看原图' : '打开'}</a>
-        <a href={url} download={name}>下载</a>
+        <DownloadControl key={url} url={url} name={name} />
       </div>
     </>}
   </div>;
