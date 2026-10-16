@@ -41,4 +41,4 @@ if [ -n "$PUBLIC_CONFIG" ]; then
   echo "Easel 反向代理访问地址：$PUBLIC_ORIGIN"
 fi
 echo "Easel 局域网地址：http://$LAN_IP:7860"
-exec .venv/bin/easel web "$@"
+exec .venv/bin/python -m easel.web_startup "$@"
