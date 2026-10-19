@@ -54,6 +54,7 @@ from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, api_config, api_mod
 from easel.chat_media import media_suffix
 from easel.conversations import Conversations, Conflict as ConversationConflict, Missing as ConversationMissing
 from easel import harnesses
+from easel.overseas_trends import create_router as create_overseas_trends_router
 from easel.harnesses import store as harness_store
 from easel.harnesses.base import HarnessError, RunRequest
 try:
@@ -480,6 +481,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
+app.include_router(create_overseas_trends_router(ENV_FILE))
 
 def _local_ports(env_port: str) -> set[str]:
     """本机写守卫放行的端口集合：固定的 7860/7870/5173，加上 `--port`/EASEL_PORT

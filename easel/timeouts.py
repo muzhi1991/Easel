@@ -16,3 +16,4 @@ TIMEOUT_LOCAL_AGENT_CONFIG = 25  # 本机 Agent 插件发现、登录检查、�
 TIMEOUT_LOCAL_AGENT_INSTALL = 300  # 官方 Codex 插件首次安装及实例登记
 
 TIMEOUT_CHAT_MEDIA = 10  # 对话结束后读取本轮媒体引用；不重新调用模型
+TIMEOUT_TREND_FEED = 10  # 独立海外 RSS 获取
