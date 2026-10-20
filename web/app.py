@@ -4022,7 +4022,7 @@ async def api_chat_stream(req: ChatRequest):
                     note = (f"\n\n---\n⚠️ 上面这条**被截断**了（stopReason={sr}，单条回复触顶）。"
                             f"回我「继续」我接着写完，或让我把任务拆小一点。")
                 elif rc not in (0, None):
-                    note = (f"\n\n---\n⚠️ 生成**被中断**（退出码 {rc}，多半是超时或系统负载过高把进程杀了），"
+                    note = (f"\n\n---\n⚠️ 生成**被中断**（退出码 {rc}，请查看上方错误信息或服务日志），"
                             f"不是正常收尾。可以让我重试。")
                 elif sr in ("tool_use", "tool_calls", "function_call"):
                     note = ("\n\n---\n⚠️ 我刚做完这一步、**正要执行下一步操作时中断了**"

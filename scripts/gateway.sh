@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Easel — OpenClaw gateway 管理脚本（隔离模式）
 # 所有操作通过 --profile easel 隔离，不影响用户自己的 OpenClaw
-# 用法: ./scripts/gateway.sh {start|stop|restart|status|logs}
+# 用法: ./scripts/gateway.sh {start [--no-force]|stop|restart|status|logs}
 
 PROFILE="easel"
 LOGFILE="/tmp/easel-gateway.log"
@@ -150,6 +150,14 @@ case "${1:-status}" in
         # healthz 不通但端口被占：下面的 --force 会强杀这个进程。先把它打出来 ——
         # 「静默强杀」正是之前误伤别的 profile 时最难排查的一环。
         OCCUPANT="$(gateway_pid)"
+        GATEWAY_ARGS=(gateway run --force --allow-unconfigured --bind loopback)
+        if [ "${2:-}" = "--no-force" ]; then
+            GATEWAY_ARGS=(gateway run --allow-unconfigured --bind loopback)
+            if [ -n "$OCCUPANT" ]; then
+                echo "[easel] 网关端口仍由 PID $OCCUPANT 占用；等待恢复，不强制接管" >&2
+                exit 1
+            fi
+        fi
         if [ -n "$OCCUPANT" ]; then
             echo "[easel] 端口 $GATEWAY_PORT 被 PID $OCCUPANT 占用且 healthz 不通；--force 将强制接管" >&2
             echo "[easel]   占用进程：$(_cmdline "$OCCUPANT" | cut -c1-120)" >&2
@@ -170,7 +178,7 @@ case "${1:-status}" in
                 'from easel.gateway_questions import question_bridge_supported as s; print("1" if s() else "0")' \
                 2>/dev/null | tail -n 1)" || ASKUSER_CARDS=""
         export EASEL_ASKUSER_CARDS="${ASKUSER_CARDS:-0}"   # 探不出来就按"没有卡片"走文字问答
-        _detach openclaw --profile "$PROFILE" gateway run --force --allow-unconfigured --bind loopback > "$LOGFILE" 2>&1
+        _detach openclaw --profile "$PROFILE" "${GATEWAY_ARGS[@]}" > "$LOGFILE" 2>&1
         # 轮询到 healthz 通，而不是睡死 4 秒就下结论：OpenClaw 2026.9.x 要加载十几个插件，
         # 实测冷启动 ~13s，固定 sleep 4 会让每次 start（以及 setup.sh 的第 8 步）都打出
         # "may not be ready yet" 假告警 —— 网关其实好的。上限给到 60s 再认定失败。

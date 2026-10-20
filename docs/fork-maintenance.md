@@ -99,6 +99,6 @@ EASEL_PUBLIC_URL=https://your-domain.example:8443
 
 ### macOS 登录自启与专用网关
 
-LaunchAgent 使用项目根目录的 `start-web-lan.sh` 作为统一入口。入口按当前 Agent 设置，仅在使用 OpenClaw 时先调用 `scripts/gateway.sh start`，复用已经健康的 `easel` profile 网关，并确认健康检查通过后启动 Web；不会启动或停止默认 OpenClaw profile。非交互启动自动查找 NVM 等位置的命令。网关启动失败时入口退出，由 LaunchAgent 的 KeepAlive 重试。
+LaunchAgent 使用项目根目录的 `start-web-lan.sh` 作为统一入口。入口按当前 Agent 设置，仅在使用 OpenClaw 时先调用 `scripts/gateway.sh start`，复用已经健康的 `easel` profile 网关，并确认健康检查通过后启动 Web；不会启动或停止默认 OpenClaw profile。非交互启动自动查找 NVM 等位置的命令。网关启动失败时入口退出，由 LaunchAgent 的 KeepAlive 重试。OpenClaw 模式下入口保留监督进程，每 5 秒检查专用网关；失联时自动尝试恢复，不重放已经提交的对话。恢复使用 `scripts/gateway.sh start --no-force`，不强杀仍占用端口的忙碌或退出中的网关，失败后下一轮再试。其它执行引擎不启动这项监测。
 
-实例的 LaunchAgent plist 位于用户 `~/Library/LaunchAgents/`，不提交 Git。它属于登录后自启，非登录前的系统服务。Web 与专用网关由同一入口启动；网关仍按既有脚本在后台运行，关闭 Web 不会主动停止网关。部署后使用 `launchctl kickstart -k gui/$(id -u)/com.limuzhi.easel` 重启托管服务前，先确认没有生成中的会话；不要另起一份 Web 进程。日志在实例配置指定的 `~/Library/Logs/Easel/` 和 `/tmp/easel-gateway.log`。
+实例的 LaunchAgent plist 位于用户 `~/Library/LaunchAgents/`，不提交 Git。它属于登录后自启，非登录前的系统服务。Web 与专用网关由同一入口启动；网关仍按既有脚本在后台运行，入口退出时只向 Web 进程组转发停止信号，不主动停止网关。macOS 重启 LaunchAgent 时可能同时终止该任务下的后台网关；旧网关尚未退出就被新入口判为健康的时序由持续监测兜底恢复。部署后使用 `launchctl kickstart -k gui/$(id -u)/com.limuzhi.easel` 重启托管服务前，先确认没有生成中的会话；不要另起一份 Web 进程。部署验收必须同时检查 Web 页面和专用网关 `/healthz`，并在首次检查后至少跨过一个监测周期再次确认；只有页面正常不足以证明对话可用。日志在实例配置指定的 `~/Library/Logs/Easel/` 和 `/tmp/easel-gateway.log`。
