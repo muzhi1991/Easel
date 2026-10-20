@@ -17,3 +17,8 @@ TIMEOUT_LOCAL_AGENT_INSTALL = 300  # 官方 Codex 插件首次安装及实例登
 
 TIMEOUT_CHAT_MEDIA = 10  # 对话结束后读取本轮媒体引用；不重新调用模型
 TIMEOUT_TREND_FEED = 10  # 独立海外 RSS 获取
+
+TIMEOUT_GATEWAY_CHECK = 5  # Web 运行时检查专用网关的间隔
+TIMEOUT_GATEWAY_PROBE = 3  # 专用网关 HTTP 健康探测
+TIMEOUT_GATEWAY_START = 90  # 包含适配器及网关冷启动的上限
+TIMEOUT_WEB_SHUTDOWN = 10  # 托管 Web 子进程收到停止信号后的等待上限
