@@ -3142,14 +3142,13 @@ def _read_job_events(turn_id: str, after: int = 0) -> list[dict]:
 
 
 def _raw_event_for_run(line: str, expected_run_id: str | None) -> dict | None:
-    """Parse one OpenClaw raw event and reject events from other runs.
+    """Accept only events matching an ID learned from this request's response.
 
-    The gateway multiplexes every run into one shared raw-stream file, and its
-    events carry `runId` (not `sessionId`). A turn latches onto its own runId —
-    the first event seen after the turn starts — and must ignore any event with
-    a different runId. `expected_run_id=None` means not-yet-latched → accept, so
-    the caller can latch from `event['runId']`.
+    Shared raw logs cannot establish ownership: the first event may belong to
+    another conversation. Unknown or missing IDs must fail closed.
     """
+    if not expected_run_id:
+        return None
     line = line.strip()
     if not line:
         return None
@@ -3159,10 +3158,8 @@ def _raw_event_for_run(line: str, expected_run_id: str | None) -> dict | None:
         return None
     if not isinstance(event, dict):
         return None
-    if expected_run_id is not None:
-        rid = event.get("runId")
-        if rid is not None and rid != expected_run_id:
-            return None
+    if event.get("runId") != expected_run_id:
+        return None
     return event
 
 
@@ -3490,8 +3487,8 @@ async def api_chat_stream(req: ChatRequest):
     `openclaw agent` CLI 会把整段模型输出缓冲到结束才打印（stdout 无增量）。真正跑模型的是
     常驻 gateway，它按自己的 OPENCLAW_RAW_STREAM/OPENCLAW_RAW_STREAM_PATH 把「模型原始流」逐
     token 写到**单个共享 jsonl**（SHARED_RAW_STREAM，见 scripts/gateway.sh）。后端在本轮开始时
-    记下该文件尾偏移、实时 tail 之后追加的行，用 runId 闩锁隔离本轮，把 assistant_text_stream 的
-    token delta 转成 SSE `token`、thinking delta 转成 `thinking`。stdout 仅留作错误/兜底。
+    记下该文件尾偏移，仅按 HTTP 响应的 runId 读取本轮 thinking delta。
+    CLI 无可信 runId，使用它自己的 stdout 最终输出，不读取共享事件内容。
     """
     # 每轮末尾追加「先查技能库」提醒，抗长对话指令衰减（对用户不可见）
     if req.conversationId:
@@ -3648,13 +3645,14 @@ async def api_chat_stream(req: ChatRequest):
                                 to_client("error", f"❌ 网关返回错误：{str(d['error'])[:160]}")
                                 return
                             # This wire ID is the same __openclaw.runId exposed by chat.history.
-                            # Keep it separate from diagnostic raw-stream run IDs.
+                            # Use this request-owned ID for raw-stream isolation too.
                             wire_id = d.get("id")
                             if isinstance(wire_id, str) and wire_id.startswith("chatcmpl_"):
                                 if run_info.get("gateway_run_id") not in (None, wire_id):
                                     run_info["gateway_run_conflict"] = True
                                 else:
                                     run_info["gateway_run_id"] = wire_id
+                                    run_info["run_id"] = wire_id
                             choice = (d.get("choices") or [{}])[0]
                             if choice.get("finish_reason") is not None:
                                 run_info["stop_reason"] = choice["finish_reason"]
@@ -3689,15 +3687,16 @@ async def api_chat_stream(req: ChatRequest):
                 run_info["http_error"] = True
                 to_client("error", f"❌ 网关连接失败：{str(e)[:140]}")
             finally:
-                # 先把 SENTINEL 排进 q（FIFO 保证它排在本轮所有 token 之后），再标记完成：
-                # 主循环读到它时，前面的 token 必然已全部消费过。
-                q.put_nowait(SENTINEL)
+                # The raw reader drains this run's remaining thinking before
+                # queuing SENTINEL, so completion cannot overtake its last chunks.
                 hproc.finish()
+                await raw_tail_fut
+                q.put_nowait(SENTINEL)
 
         _heal_openclaw_session(sk)       # 清洗历史里无签名 thinking 块，防回放失效
         # 原始事件流由常驻 gateway 写到共享文件（见 SHARED_RAW_STREAM / scripts/gateway.sh），
         # 不是 agent 客户端写的。本轮开始时记下文件当前尾偏移：只读此偏移之后追加的行，
-        # 再用首个新事件的 runId 闩锁本轮，隔离其它并发会话的事件。
+        # 仅按本请求 HTTP 响应给出的 runId 读取，不能用首个共享事件猜归属。
         try:
             raw_start_offset = SHARED_RAW_STREAM.stat().st_size
         except OSError:
@@ -3877,12 +3876,6 @@ async def api_chat_stream(req: ChatRequest):
                 except Exception:
                     pass
                 return
-            # 首个带 runId 的事件闩锁本轮 run（之后 _raw_event_for_run 只放行这个 run）。
-            if run_info["run_id"] is None:
-                rid = o.get("runId")
-                if rid is None:
-                    return          # 还没拿到 runId，等下一条带 runId 的事件再闩锁
-                run_info["run_id"] = rid
             ev, et, delta = o.get("event"), o.get("evtType"), o.get("delta") or ""
             # raw 日志可能乱序落盘；保留末事件用于诊断，HTTP 收尾只认自己的响应流。
             if ev:
@@ -3909,6 +3902,13 @@ async def api_chat_stream(req: ChatRequest):
 
         def _tail():
             try:
+                # HTTP discloses its run ID in SSE. Wait before reading, so
+                # early own events remain in the file and foreign events never
+                # establish ownership. CLI has no trusted ID: use its stdout.
+                while not run_info["run_id"]:
+                    if proc.poll() is not None:
+                        return
+                    time.sleep(0.04)
                 f = None
                 # gateway 刚起或本轮还没产生事件时文件可能暂不存在：轮询等它出现（进程先退出则收尾）。
                 while f is None:
@@ -3938,7 +3938,8 @@ async def api_chat_stream(req: ChatRequest):
             except Exception:
                 pass
             finally:
-                loop.call_soon_threadsafe(q.put_nowait, SENTINEL)
+                if not is_http:
+                    loop.call_soon_threadsafe(q.put_nowait, SENTINEL)
 
         stdout_fut = None
         if is_http:
@@ -3947,7 +3948,7 @@ async def api_chat_stream(req: ChatRequest):
             # 写的那份共享 raw 流里（它按 gateway 自己的 env 写，与谁触发无关）。所以这条路径
             # 照样 tail 它——_handle 里 text_delta 在 is_http 下直接丢弃，只取 thinking_delta，
             # 正文不会进两次。不 tail 的话「💭 思考过程」在 HTTP 模式下永远是空的。
-            loop.run_in_executor(None, _tail)
+            raw_tail_fut = loop.run_in_executor(None, _tail)
         else:
             stdout_fut = loop.run_in_executor(None, _drain_stdout)
             loop.run_in_executor(None, _tail)
@@ -4000,7 +4001,7 @@ async def api_chat_stream(req: ChatRequest):
             # 某些网关仅发 [DONE]，没有 finish_reason；显式异常原因仍优先于 [DONE]。
             clean_end = (
                 run_info["http_done"] and not run_info["http_error"] and sr in (None, "stop")
-                if is_http else run_info["last_ev"] == "assistant_message_end"
+                if is_http else sr in (None, "stop")
             ) and rc == 0 and not timed_out and sk not in _STOPPED_CHAT
             if not emitted:
                 clean = clean_agent_output("".join(stdout_lines))
