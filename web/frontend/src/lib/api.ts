@@ -638,6 +638,21 @@ export function streamChat(
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
+  let connection: AbortController | undefined;
+  let submitted = resumeOnly;
+  // Mobile browsers may leave a suspended fetch pending forever. Reconnect only
+  // the transport; keep the turn identity and cursor, and never repeat the POST.
+  const wake = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (turnId && submitted && !controller.signal.aborted) connection?.abort();
+  };
+  const abortConnection = () => connection?.abort();
+  controller.signal.addEventListener('abort', abortConnection);
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', wake);
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', wake);
+    window.addEventListener('pageshow', wake);
+  }
 
   const consume = async (res: Response): Promise<boolean> => {
       if (!res.ok) {
@@ -723,40 +738,59 @@ export function streamChat(
   void (async () => {
     const started = Date.now();
     let first = !resumeOnly;
-    while (!controller.signal.aborted) {
-      try {
-        const res = first
-          ? await fetch(`${BASE}/api/chat/stream`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId: agentSessionId(sessionId), turnId, attachments, thinking, ...sharedTurn }),
-              signal: controller.signal,
-            })
-          : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
-              signal: controller.signal,
-            });
-        if (!first && res.status === 404 && onRecoveryUnavailable) {
-          onRecoveryUnavailable();
+    try {
+      while (!controller.signal.aborted) {
+        connection = new AbortController();
+        try {
+          const res = first
+            ? await fetch(`${BASE}/api/chat/stream`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, persona: persona || undefined, sessionId: agentSessionId(sessionId), turnId, attachments, thinking, ...sharedTurn }),
+                signal: connection.signal,
+              })
+            : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
+                signal: connection.signal,
+              });
+          if (!first && res.status === 404 && onRecoveryUnavailable) {
+            onRecoveryUnavailable();
+            return;
+          }
+          if (res.ok) {
+            submitted = true;
+            onSubmitted?.();
+            if (!first) onActivity?.('⏳ 已重新连接，后台继续处理中…');
+          }
+          if (await consume(res)) return;
+        } catch (err: unknown) {
+          if (controller.signal.aborted) return;
+          if (connection.signal.aborted) {
+            first = false;
+            continue;
+          }
+          const status = (err as Error & { status?: number })?.status;
+          if (first && status && status >= 400 && status < 500) {
+            onError(err instanceof Error ? err : new Error('请求失败'));
+            return;
+          }
+        }
+        first = false;
+        // Backend chat runs may spend 5 minutes waiting for a session lock and then
+        // run for 2 hours. Keep reconnecting for the same end-to-end budget.
+        if (!turnId || Date.now() - started >= 130 * 60 * 1000) {
+          onError(new Error('连接中断，自动重连超时'));
           return;
         }
-        if (res.ok) onSubmitted?.();
-        if (await consume(res)) return;
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-        const status = (err as Error & { status?: number })?.status;
-        if (first && status && status >= 400 && status < 500) {
-          onError(err instanceof Error ? err : new Error('请求失败'));
-          return;
-        }
+        onInterrupted?.();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      first = false;
-      // Backend chat runs may spend 5 minutes waiting for a session lock and then
-      // run for 2 hours. Keep reconnecting for the same end-to-end budget.
-      if (!turnId || Date.now() - started >= 130 * 60 * 1000) {
-        onError(new Error('连接中断，自动重连超时'));
-        return;
+    } finally {
+      connection?.abort();
+      controller.signal.removeEventListener('abort', abortConnection);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', wake);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', wake);
+        window.removeEventListener('pageshow', wake);
       }
-      onInterrupted?.();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   })();
 
