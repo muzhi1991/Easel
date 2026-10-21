@@ -575,13 +575,14 @@ def test_raw_stream_events_are_isolated_by_run_id():
     assert web._raw_event_for_run(foreign, "run-a") is None
 
 
-def test_raw_stream_parser_accepts_events_before_run_is_latched():
-    # expected_run_id=None = 本轮尚未闩锁 → 先放行，调用方据此从 event['runId'] 闩锁。
+def test_raw_stream_parser_rejects_unknown_or_missing_run_id():
+    # Ownership must come from the request, never from a shared event.
     ev = json.dumps({
         "event": "assistant_text_stream", "evtType": "text_delta",
         "runId": "run-a", "delta": "首个事件",
     })
-    assert web._raw_event_for_run(ev, None)["delta"] == "首个事件"
+    assert web._raw_event_for_run(ev, None) is None
+    assert web._raw_event_for_run(json.dumps({"delta": "unscoped"}), "run-a") is None
 
 
 # ---- Gemini 适配器：流式端点改写 + finishReason 归一 ----

@@ -59,11 +59,12 @@ def test_http_completion_uses_own_stream(ending, expected_note, clean, raw_order
         async def __aexit__(self, *args): pass
         def stream(self, *args, **kwargs): return self
         async def aiter_lines(self):
+            yield 'data: {"id":"chatcmpl_test","choices":[{"delta":{"role":"assistant"}}]}'
             # Same run: an old delta is appended after a newer end event, exactly
             # like the captured GLM trace. This end could also be an earlier tool step.
             events = [
-                {'runId': 'run-test', 'event': 'assistant_message_end', 'ts': 200},
-                {'runId': 'run-test', 'event': 'assistant_thinking_stream',
+                {'runId': 'chatcmpl_test', 'event': 'assistant_message_end', 'ts': 200},
+                {'runId': 'chatcmpl_test', 'event': 'assistant_thinking_stream',
                  'evtType': 'thinking_delta', 'delta': 'late diagnostic', 'ts': 100},
             ]
             if raw_order == 'end_last':
@@ -109,3 +110,77 @@ def test_http_completion_uses_own_stream(ending, expected_note, clean, raw_order
     assert diag['clean_end'] is clean
     assert diag['saw_message_end'] is (raw_order != 'no_end')
     assert diag['last_ev'] == ('assistant_message_end' if raw_order == 'end_last' else 'assistant_thinking_stream')
+
+
+@pytest.mark.parametrize('transport,wire_id', [('http', 'chatcmpl_own'), ('http', None), ('cli', None)])
+def test_foreign_raw_first_never_enters_shared_history(transport, wire_id, tmp_path, monkeypatch):
+    """A second conversation starts while the first is still producing tokens."""
+    raw = tmp_path / 'raw.jsonl'
+    raw.touch()
+    monkeypatch.setattr(web, 'SESSIONS_DIR', tmp_path / 'sessions')
+    monkeypatch.setattr(web, 'DEBUG_DIR', tmp_path / 'debug')
+    monkeypatch.setattr(web, 'SHARED_RAW_STREAM', raw)
+    monkeypatch.setattr(web, '_chat_backend', lambda _: 'openclaw')
+    monkeypatch.setattr(web, '_harness_settings', lambda: {})
+    monkeypatch.setattr(web, '_heal_openclaw_session', lambda _: None)
+    monkeypatch.setattr(web, '_chat_message', lambda req: req.message)
+    monkeypatch.setattr(web, '_resolve_transport', lambda _: transport)
+    monkeypatch.setattr(web, '_apply_http_thinking', lambda *args: None)
+    monkeypatch.setattr(web, '_QBRIDGE_DISABLED', True)
+    monkeypatch.setattr(web, 'question_bridge_supported', lambda: False)
+    monkeypatch.setattr(web, 'openclaw_base_cmd', lambda: ['oc'])
+    monkeypatch.setattr(web, '_recover_chat_media', lambda *args: '')
+
+    class Client:
+        status_code = 200
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def stream(self, *args, **kwargs): return self
+        async def aiter_lines(self):
+            # Both events arrive before HTTP discloses this request's run ID.
+            with raw.open('a') as f:
+                for run, text in [('chatcmpl_foreign', 'BMW-FOREIGN'),
+                                  ('chatcmpl_own', 'DEEPSEEK-OWN'), (None, 'UNSCOPED')]:
+                    f.write(json.dumps({'runId': run, 'event': 'assistant_thinking_stream',
+                                        'evtType': 'thinking_delta', 'delta': text}) + '\n')
+            await asyncio.sleep(.1)
+            yield 'data: ' + json.dumps({'id': wire_id, 'choices': [{'delta': {'content': 'OWN-REPLY'}}]})
+            # Wait for the actual raw reader, rather than depending on timing.
+            if wire_id:
+                for _ in range(100):
+                    events = web._read_job_events('isolation-turn')
+                    if any(e['event'] == 'thinking' for e in events): break
+                    await asyncio.sleep(.01)
+            yield 'data: ' + json.dumps({'id': wire_id, 'choices': [{'delta': {}, 'finish_reason': 'stop'}]})
+            yield 'data: [DONE]'
+    class Process:
+        def __init__(self, *args, **kwargs):
+            self.returncode = None
+            self.stdout = self.output()
+        def output(self):
+            with raw.open('a') as f:
+                f.write(json.dumps({'runId': 'foreign', 'event': 'assistant_text_stream',
+                                    'evtType': 'text_delta', 'delta': 'FOREIGN-REPLY'}) + '\n')
+            yield 'OWN-REPLY'
+            self.returncode = 0
+        def poll(self): return self.returncode
+        def wait(self, **kwargs): return self.returncode
+    monkeypatch.setattr(web.subprocess, 'Popen', Process)
+    monkeypatch.setattr(httpx, 'AsyncClient', Client)
+    web._conversations().create({'id': 'shared_isolation', 'title': 'DeepSeek', 'created': 1, 'messages': []})
+
+    async def run():
+        response = await web.api_chat_stream(web.ChatRequest(
+            message='remember this style', sessionId='isolation', conversationId='shared_isolation',
+            revision=1, turnId='isolation-turn', thinking='high'))
+        return [e async for e in response.body_iterator]
+    events = asyncio.run(asyncio.wait_for(run(), 8))
+    thinking = ''.join(json.loads(e['data']) for e in events if e['event'] == 'thinking')
+    expected = 'DEEPSEEK-OWN' if wire_id else ''
+    assert thinking == expected
+    saved = web._conversations().get('shared_isolation')['messages'][-1]
+    assert saved['thinking'] == expected
+    assert saved['content'] == 'OWN-REPLY'
+    replay = web._read_job_events('isolation-turn')
+    assert ''.join(e['data'] for e in replay if e['event'] == 'thinking') == expected
