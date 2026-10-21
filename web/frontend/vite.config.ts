@@ -9,7 +9,7 @@ export default defineConfig({
     name: 'easel-offline-shell',
     apply: 'build',
     generateBundle(_, bundle) {
-      const files = ['./', 'manifest.webmanifest', 'app-icon.png', ...Object.keys(bundle).filter(name => name.startsWith('assets/'))];
+      const files = ['./', 'manifest.webmanifest', 'app-icon.png?v=lime-1', ...Object.keys(bundle).filter(name => name.startsWith('assets/'))];
       const hash = createHash('sha256');
       for (const name of Object.keys(bundle).sort()) {
         const output = bundle[name];
