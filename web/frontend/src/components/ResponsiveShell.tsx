@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { IconNewChat } from './icons';
+import { observeMobileViewport } from '../lib/mobileViewport';
 
 const MOBILE_QUERY = '(max-width: 767px), (max-width: 1023px) and (pointer: coarse)';
 
@@ -32,21 +33,7 @@ export default function ResponsiveShell({ title, persona, navigation, onNewChat,
   }, []);
 
   useEffect(() => {
-    // dvh follows browser chrome; VisualViewport also follows the software keyboard.
-    const viewport = window.visualViewport;
-    const resize = () => {
-      if (mobile && viewport && viewport.scale === 1) {
-        document.documentElement.style.setProperty('--app-height', `${viewport.height}px`);
-      } else {
-        document.documentElement.style.removeProperty('--app-height');
-      }
-    };
-    resize();
-    viewport?.addEventListener('resize', resize);
-    return () => {
-      viewport?.removeEventListener('resize', resize);
-      document.documentElement.style.removeProperty('--app-height');
-    };
+    if (mobile) return observeMobileViewport();
   }, [mobile]);
 
   useEffect(() => {

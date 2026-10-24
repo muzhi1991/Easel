@@ -4,6 +4,7 @@
 
 @media (max-width: 767px), (max-width: 1023px) and (pointer: coarse) {
   .app-layout {
+    position: fixed; top: var(--app-top, 0px); left: 0;
     height: var(--app-height, 100dvh);
     flex-direction: column;
     padding-top: env(safe-area-inset-top);
@@ -24,7 +25,7 @@
   .mobile-header-context strong { font-size: 15px; font-weight: 650; }
   .mobile-header-context span { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .navigation-shell {
-    display: block; position: fixed; inset: 0 auto 0 0; z-index: 51;
+    display: block; position: fixed; inset: var(--app-top, 0px) auto auto 0; z-index: 51;
     width: min(320px, calc(100vw - 48px)); height: var(--app-height, 100dvh);
     /* Keep asynchronously inserted history paintable while the drawer is closed.
        ResponsiveShell also makes the closed drawer inert. */
@@ -32,7 +33,11 @@
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
   }
   .navigation-shell.is-open { opacity: 1; pointer-events: auto; transform: none; box-shadow: var(--shadow-lg); }
-  .navigation-shell .sidebar { width: 100%; min-width: 0; }
+  /* Scroll the entire drawer on short keyboard viewports. Fixed navigation
+     above a shrinking history list otherwise leaves the rename field clipped. */
+  .navigation-shell .sidebar { width: 100%; min-width: 0; overflow-y: auto; }
+  .navigation-shell .sidebar > * { flex-shrink: 0; }
+  .navigation-shell .sidebar-section { flex: 1 0 auto; overflow: visible; }
   .mobile-nav-backdrop { position: fixed; inset: 0; z-index: 50; border: 0; background: rgba(18,22,35,.4); }
   .mobile-nav-close { display: flex; position: absolute; top: calc(9px + env(safe-area-inset-top)); right: 8px; z-index: 1; }
   .sidebar-logo { padding-right: 38px; }
