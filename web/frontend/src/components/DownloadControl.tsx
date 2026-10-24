@@ -6,6 +6,8 @@ export default function DownloadControl({ url, name }: { url: string; name: stri
   const task = useRef<DownloadTask | null>(null);
   const [state, setState] = useState<DownloadState | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [linkNotice, setLinkNotice] = useState('');
+  const [showLink, setShowLink] = useState(false);
   const busy = state?.phase === 'connecting' || state?.phase === 'receiving';
   const ready = state?.phase === 'ready';
   const sharing = state?.phase === 'sharing';
@@ -30,15 +32,34 @@ export default function DownloadControl({ url, name }: { url: string; name: stri
   const eta = state?.total && state.speed > 0 && now - state.started > 3000 && !stalled
     ? Math.ceil(Math.max(0, state.total - state.received) / state.speed) : undefined;
   const supportsShare = typeof navigator.share === 'function' && typeof navigator.canShare === 'function';
+  const standalone = window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const nativeSave = standalone && supportsShare;
+  const downloadUrl = browserDownloadUrl(url, window.location.origin);
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(downloadUrl);
+      setLinkNotice('下载链接已复制，请粘贴到 Safari、Chrome 等浏览器中打开。');
+    } catch {
+      setShowLink(true);
+      setLinkNotice('请长按下方链接复制，再粘贴到浏览器中打开。');
+    }
+  }
   return <div className="download-control">
     <div className="download-actions">
-      {!busy && !ready && !sharing && state?.phase !== 'browser' && <button type="button" onClick={() => start(false)}>{state?.phase === 'error' || state?.phase === 'cancelled' ? '重新下载' : '下载'}</button>}
-      {supportsShare && !busy && !sharing && state?.phase !== 'browser' && <button type="button" onClick={() => ready ? void task.current?.share() : start(true)}>{ready ? '分享/保存' : '准备分享/保存'}</button>}
+      {!nativeSave && !busy && !ready && !sharing && state?.phase !== 'browser' && <button type="button" onClick={() => start(false)}>{state?.phase === 'error' || state?.phase === 'cancelled' ? '重新下载' : '下载'}</button>}
+      {supportsShare && !busy && !sharing && <button type="button" onClick={() => ready ? void task.current?.share() : start(true)}>{ready ? '分享/保存' : '准备分享/保存'}</button>}
       {(busy || ready) && <button type="button" onClick={() => task.current?.cancel()}>{ready ? '清理临时文件' : '取消下载'}</button>}
-      {!sharing && <a href={browserDownloadUrl(url, window.location.origin)} download={name} target="_blank" rel="noreferrer"
+      {!sharing && <a href={downloadUrl} download={name} target="_blank" rel="noreferrer"
         onClick={() => { task.current?.dispose(); task.current = null; setState({ phase: 'browser', received: 0, speed: 0, started: 0, lastData: 0,
-          message: '已请求浏览器下载，请在浏览器下载列表查看进度；外部文件可能会在新页面打开。' }); }}>使用浏览器下载</a>}
+          message: supportsShare
+            ? '已尝试交给浏览器下载。如果没有反应，请使用“准备分享/保存”，或复制下载链接到浏览器打开。'
+            : '已尝试交给浏览器下载。如果没有反应，请复制下载链接到浏览器打开。' }); }}>使用浏览器下载</a>}
+      {!sharing && <button type="button" onClick={() => void copyLink()}>复制下载链接</button>}
     </div>
+    {nativeSave && !state && <p>先准备文件，再点“分享/保存”，从系统菜单保存视频或存储到文件。</p>}
+    {linkNotice && <p role="status">{linkNotice}</p>}
+    {showLink && <input aria-label="下载链接" value={downloadUrl} readOnly onFocus={event => event.currentTarget.select()} />}
     {busy && state && <div className="download-progress">
       <progress aria-label={`${name} 下载进度`} max={100} value={percent} />
       <span>{state.phase === 'connecting' ? '正在连接…' : `${percent === undefined ? '' : percent + '% · '}${formatBytes(state.received)}${state.total ? ' / ' + formatBytes(state.total) : ' 已下载'}`}</span>

@@ -1556,5 +1556,6 @@ textarea.field { resize: vertical; min-height: 90px; }
 .download-actions button, .download-actions a { min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; cursor: pointer; text-decoration: none; }
 .download-actions button:first-child { border-color: var(--accent-start); }
 .download-control p { margin: 8px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.download-control input { width: 100%; min-width: 0; box-sizing: border-box; margin-top: 8px; font-size: 16px; }
 .download-progress { display: grid; gap: 4px; margin-top: 10px; font-variant-numeric: tabular-nums; }
 .download-progress progress { width: 100%; height: 8px; accent-color: var(--accent-start); }

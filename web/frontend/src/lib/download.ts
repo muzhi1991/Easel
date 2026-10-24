@@ -1,5 +1,7 @@
 /** Bounded, cancellable downloads. No file bytes are stored in React state or caches. */
 export const MEMORY_LIMIT = 32 * 1024 * 1024;
+// Explicit native sharing needs a File; keep a separate, bounded allowance for videos.
+export const SHARE_MEMORY_LIMIT = 64 * 1024 * 1024;
 export const SHARE_TTL = 60_000;
 export const SAVE_GRACE = 10_000;
 export type DownloadState = {
@@ -54,6 +56,7 @@ export class DownloadTask {
     this.dispose();
   }
   async start(url: string, name: string, share: boolean) {
+    const limit = share ? SHARE_MEMORY_LIMIT : MEMORY_LIMIT;
     if (owner) {
       this.update({ phase: 'error', message: '另一个文件正在下载、等待保存或释放临时数据，请稍后重试或先取消它。' });
       return;
@@ -68,7 +71,7 @@ export class DownloadTask {
       const length = Number(response.headers.get('content-length'));
       const encoding = response.headers.get('content-encoding');
       const total = !encoding || encoding === 'identity' ? (length > 0 && Number.isFinite(length) ? length : undefined) : undefined;
-      if ((total && total > MEMORY_LIMIT) || !response.body) {
+      if ((total && total > limit) || !response.body) {
         this.update({ phase: 'browser', message: '为节省手机内存，请使用浏览器下载，并在浏览器下载列表查看进度。' });
         return;
       }
@@ -80,7 +83,7 @@ export class DownloadTask {
         if (this.disposed) return;
         if (done) break;
         const received = this.state.received + value.byteLength;
-        if (received > MEMORY_LIMIT) {
+        if (received > limit) {
           this.update({ phase: 'browser', message: '文件超过网页下载上限，临时数据已清理。请使用浏览器重新下载。' });
           return;
         }

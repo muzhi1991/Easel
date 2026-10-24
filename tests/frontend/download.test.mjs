@@ -126,3 +126,29 @@ test('native local download adds attachment flag without altering external signe
   assert.equal(v.browserDownloadUrl('/easel/api/media/video.mp4?x=1','https://easel.test'),'https://easel.test/easel/api/media/video.mp4?x=1&download=true');
   assert.equal(v.browserDownloadUrl('https://cdn.test/image?token=1','https://easel.test'),'https://cdn.test/image?token=1');
 });
+
+test('final 39 MB video can be prepared for native saving without browser handoff', async () => {
+  const size = 39175553;
+  let shared;
+  const v = setup(async () => response([size], {'content-length': String(size), 'content-type': 'video/mp4'}),
+    async data => { shared = data.files[0]; });
+  await v.task.start('/api/media/final.mp4', 'final.mp4', true);
+  assert.equal(v.states.at(-1).phase, 'ready');
+  assert.equal(v.task.file.size, size);
+  await v.task.share();
+  assert.equal(shared.size, size);
+  assert.equal(shared.type, 'video/mp4');
+  assert.equal(v.task.file, undefined);
+});
+
+test('native sharing remains bounded for both declared and unknown large files', async () => {
+  for (const known of [true, false]) {
+    const v = setup(async () => response([32*1024*1024, 32*1024*1024, 1],
+      known ? {'content-length': String(64*1024*1024+1)} : {}));
+    await v.task.start('/large.mp4', 'large.mp4', true);
+    assert.equal(v.states.at(-1).phase, 'browser');
+    assert.equal(v.task.file, undefined);
+    assert.equal(v.task.chunks.length, 0);
+    assert.equal(v.calls.urls.length, 0);
+  }
+});
