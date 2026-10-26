@@ -878,7 +878,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${(mediaOk('video') || videoAdapterConfigured) ? 'ok' : 'off'}`}><span className="dot" />{(mediaOk('video') || videoAdapterConfigured) ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">选择默认生图服务；对话中可指定其他模型；「主/备」= 默认</span>
+                      <span className="desc">选择默认视频服务；对话中可指定其他模型；「主/备」= 默认</span>
                       <span className="spacer" />
                     </div>
                     <MediaProviders channel="video" onConfigured={setVideoAdapterConfigured} builtInBoard={(extra) => renderBoard(mediaRows.video || [], {

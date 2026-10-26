@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { browserDownloadUrl, DownloadTask, formatBytes } from '../lib/download';
+import { browserDownloadUrl, DownloadTask, formatBytes, isStandalone } from '../lib/download';
 import type { DownloadState } from '../lib/download';
 
 export default function DownloadControl({ url, name }: { url: string; name: string }) {
@@ -32,8 +32,7 @@ export default function DownloadControl({ url, name }: { url: string; name: stri
   const eta = state?.total && state.speed > 0 && now - state.started > 3000 && !stalled
     ? Math.ceil(Math.max(0, state.total - state.received) / state.speed) : undefined;
   const supportsShare = typeof navigator.share === 'function' && typeof navigator.canShare === 'function';
-  const standalone = window.matchMedia('(display-mode: standalone)').matches
-    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const standalone = isStandalone();
   const nativeSave = standalone && supportsShare;
   const downloadUrl = browserDownloadUrl(url, window.location.origin);
   async function copyLink() {
@@ -50,13 +49,14 @@ export default function DownloadControl({ url, name }: { url: string; name: stri
       {!nativeSave && !busy && !ready && !sharing && state?.phase !== 'browser' && <button type="button" onClick={() => start(false)}>{state?.phase === 'error' || state?.phase === 'cancelled' ? '重新下载' : '下载'}</button>}
       {supportsShare && !busy && !sharing && <button type="button" onClick={() => ready ? void task.current?.share() : start(true)}>{ready ? '分享/保存' : '准备分享/保存'}</button>}
       {(busy || ready) && <button type="button" onClick={() => task.current?.cancel()}>{ready ? '清理临时文件' : '取消下载'}</button>}
-      {!sharing && <a href={downloadUrl} download={name} target="_blank" rel="noreferrer"
+      {!sharing && !standalone && <a href={downloadUrl} download={name} target="_blank" rel="noreferrer"
         onClick={() => { task.current?.dispose(); task.current = null; setState({ phase: 'browser', received: 0, speed: 0, started: 0, lastData: 0,
           message: supportsShare
             ? '已尝试交给浏览器下载。如果没有反应，请使用“准备分享/保存”，或复制下载链接到浏览器打开。'
             : '已尝试交给浏览器下载。如果没有反应，请复制下载链接到浏览器打开。' }); }}>使用浏览器下载</a>}
-      {!sharing && <button type="button" onClick={() => void copyLink()}>复制下载链接</button>}
+      {!sharing && <button type="button" onClick={() => void copyLink()}>{standalone ? '复制链接到 Safari 下载' : '复制下载链接'}</button>}
     </div>
+    {standalone && <p>保存后可留在 Easel。大文件请复制链接，在 Safari 的下载列表中保存和查看。</p>}
     {nativeSave && !state && <p>先准备文件，再点“分享/保存”，从系统菜单保存视频或存储到文件。</p>}
     {linkNotice && <p role="status">{linkNotice}</p>}
     {showLink && <input aria-label="下载链接" value={downloadUrl} readOnly onFocus={event => event.currentTarget.select()} />}

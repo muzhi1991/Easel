@@ -608,3 +608,18 @@ def test_gemini_stream_endpoint_preserves_existing_query():
 ])
 def test_gemini_finish_reason_mapping(reason, mapped):
     assert gemini_adapter.map_finish_reason(reason) == mapped
+
+
+def test_music_skill_recognizes_default_media_instance(tmp_path, monkeypatch):
+    from easel_media_adapters import MediaRuntime
+    runtime = MediaRuntime(tmp_path / 'media.json')
+    runtime.save_provider({'id': 'music-test', 'name': 'Music', 'adapter': 'yue2-music',
+                          'settings': {'base_url': 'http://music.test', 'api_key_env': 'TEST_MUSIC_KEY'}}, ['music'])
+    monkeypatch.setattr(web, '_media_runtime', lambda: runtime)
+    monkeypatch.delenv('TEST_MUSIC_KEY', raising=False)
+    assert web._skill_api_configured('ai-music', {'TEST_MUSIC_KEY': 'test-credential'})
+    assert not web._skill_api_configured('ai-music', {})
+    monkeypatch.setenv('TEST_MUSIC_KEY', 'process-credential')
+    assert web._skill_api_configured('ai-music', {})
+    runtime.clear_default('music')
+    assert not web._skill_api_configured('ai-music', {})
