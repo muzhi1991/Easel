@@ -83,7 +83,9 @@ git merge --no-ff upstream/main
 
 部署包包括该提交的运行源码和预构建的前端资源，适用于 macOS。打包时排除纯宣传素材 `assets/readme/`、`web/static/showcase/` 及对应宣传页 `web/static/main.html`；这些文件仍保留在 Git 中，但部署包不提供该宣传页。应用图标、PWA 资源、技能字体等运行资源保留，排除清单记录在 `BUILD-INFO.json` 中。它不是独立可执行程序，不包含 Python 虚拟环境、Node 依赖、模型权重、用户目录配置或未跟踪文件。部署时仍需在目标 Mac 安装 Python 依赖和本地媒体适配包；配置与会话数据保留在原位置。不要把整份归档直接覆盖运行目录。
 
-此工作流仅检查、打包和上传，不连接本地机器、不配置 SSH 或自托管 runner、不部署、不重启服务。产物准备好不代表运行版本已经更新；实际部署另按维护窗口安排。`main` 原有 CI 与定时任务保持不变。
+此工作流仅检查、打包和上传，不连接本地机器、不配置 SSH 或自托管 runner、不部署、不重启服务。产物准备好不代表运行版本已经更新；实际部署另按维护窗口安排。
+
+本 fork 不使用 Windows，日常检查以 `Dev CI` 的 Linux/macOS 结果为准；`dev` 的 Native tool budget acceptance 专项验收只跑 Linux。`main` 中官方工作流文件保持原样，但在本 fork 的 GitHub Actions 设置中停用名为 `CI` 的工作流，避免官方 Windows 测试和每日真实安装任务重复报错。此设置不影响官方仓库，也不影响 `Dev CI` 的测试、前端构建和部署包。停用命令为 `gh workflow disable ci.yml --repo muzhi1991/Easel`；未来需要验证官方完整矩阵时，可用 `gh workflow enable ci.yml --repo muzhi1991/Easel` 恢复。同步上游后检查该工作流仍处于停用状态。
 
 ## 统一 Web 启动入口
 
