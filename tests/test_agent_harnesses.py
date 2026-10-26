@@ -417,24 +417,68 @@ def test_acp_cannot_silently_replace_unsupported_history(tmp_path):
 
 @pytest.mark.parametrize("runtime,adapter,cancel_method", [
     ("codex", CodexAdapter, "turn/interrupt"), ("acp", ACPAdapter, "session/cancel")])
-def test_cancel_interrupts_native_turn(tmp_path, runtime, adapter, cancel_method):
+def test_cancel_interrupts_native_turn(tmp_path, monkeypatch, runtime, adapter, cancel_method):
     async def exercise():
+        started = asyncio.Event()
+        original_call = RPC.call
+        async def call(self, method, *args, **kwargs):
+            result = await original_call(self, method, *args, **kwargs)
+            if method == "turn/start":
+                started.set()
+            return result
+        monkeypatch.setattr(RPC, "call", call)
         async def reject(questions):
             raise AssertionError
         task = asyncio.create_task(adapter().run(request_for(tmp_path, runtime, "hang"),
                                                 lambda *args: None, reject, lambda identifier: None))
-        for attempt in range(100):
+        deadline = asyncio.get_running_loop().time() + 10
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.02)
             path = tmp_path / "audit.jsonl"
-            if path.exists() and any(message.get("method") in ("turn/start", "session/prompt") for message in audit(tmp_path)):
+            if ((runtime == "codex" and started.is_set())
+                    or (runtime == "acp" and path.exists()
+                        and any(message.get("method") == "session/prompt" for message in audit(tmp_path)))):
                 break
-        await asyncio.sleep(0.05)
+        else:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            pytest.fail("native turn did not start before cancellation test deadline")
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
     asyncio.run(exercise())
     assert any(message.get("method") == cancel_method for message in audit(tmp_path))
+
+
+@pytest.mark.parametrize("mode", ["slow-cancel", "ignore-cancel"])
+def test_acp_cancellation_waits_for_response_but_has_a_deadline(tmp_path, mode):
+    async def exercise():
+        async def reject(questions):
+            raise AssertionError("unexpected permission request")
+        task = asyncio.create_task(ACPAdapter().run(request_for(tmp_path, "acp", mode),
+                                   lambda *args: None, reject, lambda identifier: None))
+        try:
+            deadline = asyncio.get_running_loop().time() + 10
+            while asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.02)
+                path = tmp_path / "audit.jsonl"
+                if path.exists() and any(m.get("method") == "session/prompt" for m in audit(tmp_path)):
+                    break
+            else:
+                pytest.fail("ACP fixture did not start its prompt")
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 8)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(exercise())
+    methods = [message.get("method") for message in audit(tmp_path)]
+    assert methods.count("session/prompt") == 1
+    assert methods.count("session/cancel") == 1
+    assert ("fixture/cancel-completed" in methods) == (mode == "slow-cancel")
 
 
 def test_rpc_stderr_and_invalid_json(tmp_path):
@@ -517,6 +561,8 @@ def test_binding_is_hashed_durable_and_cannot_change_owner(tmp_path):
                                        ("opencode", "opencode-ai/bin/opencode")])
 def test_windows_npm_launcher_is_shell_free(tmp_path, monkeypatch, name, script):
     launcher = tmp_path / f"{name}.cmd"
+    target = script.replace("/", "\\")
+    launcher.write_text(f'"%_prog%" "%dp0%\\node_modules\\{target}" %*\n', encoding="utf-8")
     entry = tmp_path / "node_modules" / script
     entry.parent.mkdir(parents=True)
     entry.touch()
@@ -528,6 +574,7 @@ def test_windows_npm_launcher_is_shell_free(tmp_path, monkeypatch, name, script)
 
 def test_windows_opencode_native_executable_launcher(tmp_path, monkeypatch):
     launcher = tmp_path / "opencode.cmd"
+    launcher.write_text('"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe" %*\n', encoding="utf-8")
     native = tmp_path / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
     native.parent.mkdir(parents=True)
     native.touch()
@@ -539,6 +586,8 @@ def test_windows_opencode_native_executable_launcher(tmp_path, monkeypatch):
                                        ("opencode", "opencode-ai/bin/opencode")])
 def test_windows_npm_launcher_prefers_adjacent_node(tmp_path, monkeypatch, name, script):
     launcher = tmp_path / f"{name}.cmd"
+    target = script.replace("/", "\\")
+    launcher.write_text(f'"%_prog%" "%dp0%\\node_modules\\{target}" %*\n', encoding="utf-8")
     entry = tmp_path / "node_modules" / script
     entry.parent.mkdir(parents=True)
     entry.touch()

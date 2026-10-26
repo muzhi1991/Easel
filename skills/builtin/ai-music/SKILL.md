@@ -78,3 +78,4 @@ python skills/shared/scripts/ai_music.py generate --resume \
 - 用户要试听时交付可播放音频；需要歌词字幕时另用 ASR/对齐，不按歌词长度伪造时间戳。
 
 裁剪、响度归一化与配视频复用 `audio_ops.py` / `video_ops.py`；裁剪属于后处理，不宣称模型精确生成了指定秒数。
+音频文件内的人声与 BGM 用 `audio_mix.py mix`；给视频加 BGM/旁白用 `video_ops.py bgm`（旁白短于视频时加 `--music-loop-off`）。

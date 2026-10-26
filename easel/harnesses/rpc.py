@@ -15,6 +15,9 @@ from .workspace import harness_instructions
 _POOLS: dict[asyncio.AbstractEventLoop, dict[tuple, dict]] = {}
 IDLE_SECONDS = 300
 MAX_IDLE_PROCESSES = 8
+# Bound outstanding reverse RPCs (permissions/questions), not tool executions.
+MAX_CLIENT_REQUESTS = 64
+MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 
 
 async def close_sessions(session_key: str | None = None):
@@ -125,6 +128,7 @@ class RPC:
         self.stderr = None
         self.write_lock = asyncio.Lock()
         self.client_error = None
+        self.reader_error = None
         self.initialized = None
         self.native_id = ""
 
@@ -135,7 +139,7 @@ class RPC:
             self.process = await asyncio.create_subprocess_exec(
                 *self.command, cwd=str(self.request.cwd), env=env,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, limit=4 * 1024 * 1024,
+                stderr=asyncio.subprocess.PIPE, limit=MAX_MESSAGE_BYTES,
                 start_new_session=os.name != "nt")
         except OSError as error:
             raise HarnessError("无法启动 Agent CLI，请检查安装与 PATH") from error
@@ -186,7 +190,15 @@ class RPC:
     async def _read(self):
         failure = HarnessError("Agent 协议连接已断开，请检查 CLI 登录、模型与版本")
         try:
-            while line := await self.process.stdout.readline():
+            while True:
+                try:
+                    line = await self.process.stdout.readline()
+                except ValueError:
+                    raise HarnessError(
+                        f"Agent 协议单行消息超过 {MAX_MESSAGE_BYTES} 字节上限，"
+                        "请升级 Agent 以分块输出或回放历史") from None
+                if not line:
+                    break
                 try:
                     message = json.loads(line)
                     if not isinstance(message, dict):
@@ -195,6 +207,9 @@ class RPC:
                     raise HarnessError("Agent 返回了无效 JSON-RPC 数据") from None
                 if "method" in message:
                     if "id" in message:
+                        self.tasks.difference_update([task for task in self.tasks if task.done()])
+                        if len(self.tasks) >= MAX_CLIENT_REQUESTS:
+                            raise HarnessError("Agent 客户端请求并发超过上限，本轮已终止")
                         task = asyncio.create_task(self._serve(message))
                         self.tasks.add(task)
                         task.add_done_callback(self.tasks.discard)
@@ -205,19 +220,24 @@ class RPC:
                     if future is not None and not future.done():
                         if "error" in message:
                             error = message["error"]
-                            detail = str(error.get("message", "请求失败"))[:1000]
-                            for key, value in self.request.env.items():
-                                if any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
-                                    if len(value) >= 4:
-                                        detail = detail.replace(value, "***")
+                            if error.get("code") in (-32700, -32600, -32602, "INVALID_REQUEST"):
+                                detail = "请求格式或参数无效，请检查 Agent CLI 协议版本"
+                            else:
+                                detail = str(error.get("message", "请求失败"))[:1000]
+                                for key, value in self.request.env.items():
+                                    if any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+                                        if len(value) >= 4:
+                                            detail = detail.replace(value, "***")
                             future.set_exception(HarnessError(f"Agent 协议错误：{detail}"))
                         else:
                             future.set_result(message.get("result") or {})
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            failure = error if isinstance(error, HarnessError) else HarnessError("Agent 协议读取失败")
+            failure = error if isinstance(error, HarnessError) else HarnessError(
+                f"Agent 协议读取失败（{type(error).__name__}）")
         finally:
+            self.reader_error = failure
             for future in self.pending.values():
                 if not future.done():
                     future.set_exception(failure)
@@ -233,7 +253,7 @@ class RPC:
             if self.client_error:
                 raise self.client_error
             return result
-        raise HarnessError("Agent 在本轮完成前退出，请检查 CLI 登录与模型配置")
+        raise self.reader_error or HarnessError("Agent 在本轮完成前退出，请检查 CLI 登录与模型配置")
 
     async def __aexit__(self, *arguments):
         for task in self.tasks:
@@ -254,7 +274,7 @@ class RPC:
             else:
                 try:
                     os.killpg(self.process.pid, signal.SIGTERM)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
             try:
                 await asyncio.wait_for(self.process.wait(), 3)
@@ -264,13 +284,13 @@ class RPC:
                 else:
                     try:
                         os.killpg(self.process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, PermissionError):
                         pass
                 await self.process.wait()
             if os.name != "nt":
                 try:
                     os.killpg(self.process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
         for task in (self.reader, self.stderr):
             if task is not None:
