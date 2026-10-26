@@ -377,16 +377,18 @@ export interface ChatQuestion {
   id: string;              // gateway question record id (ask_...)
   questions: ChatQuestionItem[];
   expiresAtMs?: number;
+  status?: string;
 }
+export interface ChatQuestionClosed { id: string; status: string; }
 export async function answerQuestion(
   payload: { questionId: string; answers: Record<string, string[]>; resolvedBy?: string },
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; status?: string; expired?: boolean }> {
   const res = await fetch(`${BASE}/api/chat/question/answer`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
-  return { ok: data.ok === true, error: data.error };
+  const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; status?: string; expired?: boolean };
+  return { ok: data.ok === true, error: data.error, status: data.status, expired: data.expired };
 }
 
 /** 批量查 question 状态：过滤重放中已解决/已过期的旧题。 */
@@ -521,11 +523,29 @@ export interface PublishResult {
   pending?: boolean;
 }
 
+export interface PublishingPolicy {
+  mode: 'manual' | 'automated';
+  automaticSubmission: boolean;
+}
+
+export function fetchPublishingPolicy(): Promise<PublishingPolicy> {
+  return request('/api/publishing-policy');
+}
+
+/** Create a local export only; no social platform is contacted. */
+export function exportManualPackage(platform: string, payload: {
+  title: string; body: string; tags: string; media: string[]; reviewed: boolean;
+}): Promise<{ path: string; filename: string; published: false }> {
+  return request(`/api/manual-publish/${encodeURIComponent(platform)}/export`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+}
+
 /** 一键发布到某平台（真发布，--exec）。media 为 outputs 相对路径数组。
  * 抖音返回 {async:true}，需轮询 publishStatus；其他平台同步返回结果。 */
 export function publishNow(
   platform: string,
-  payload: { title: string; body: string; media: string[]; tags?: string },
+  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string },
 ): Promise<PublishResult> {
   return request<PublishResult>(`/api/publish/${encodeURIComponent(platform)}`, {
     method: 'POST',
@@ -635,6 +655,7 @@ export function streamChat(
   thinking?: ThinkingLevel,
   sharedTurn?: SharedTurn,
   onSubmitted?: () => void,
+  onQuestionClosed?: (q: ChatQuestionClosed) => void,
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -692,6 +713,11 @@ export function streamChat(
             const q = JSON.parse(data) as ChatQuestion;
             if (q && typeof q === 'object' && Array.isArray(q.questions)) onQuestion(q);
           } catch { /* 解析失败忽略 */ }
+        } else if (currentEvent === 'question_closed' && onQuestionClosed) {
+          try {
+            const closed = JSON.parse(data) as ChatQuestionClosed;
+            if (closed && typeof closed.id === 'string' && typeof closed.status === 'string') onQuestionClosed(closed);
+          } catch {}
         } else if (currentEvent === 'heartbeat') {
           // 防呆心跳：独立于 activity/thinking，仅作「未卡住」提示，不覆盖真实状态。
           if (onHeartbeat) { try { onHeartbeat(JSON.parse(data) as string); } catch { onHeartbeat(data); } }
@@ -751,8 +777,9 @@ export function streamChat(
             : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {
                 signal: connection.signal,
               });
-          if (!first && res.status === 404 && onRecoveryUnavailable) {
-            onRecoveryUnavailable();
+          if (!first && res.status === 404) {
+            if (onRecoveryUnavailable) onRecoveryUnavailable();
+            else onError(new Error('任务记录不存在或已失效，无法续接；请重新发送'));
             return;
           }
           if (res.ok) {
