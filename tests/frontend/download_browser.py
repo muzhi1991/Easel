@@ -65,6 +65,8 @@ def check(browser, url):
     control.wait_for()
     draft = page.locator('textarea').last
     draft.fill('Download return must preserve this draft')
+    draft.blur()
+    page.wait_for_timeout(800)  # Let the existing mobile viewport focus-settle finish.
     # PWA raw-media navigation must retain an app-owned return control.
     page.get_by_role("link", name="打开 ↗").click()
     dialog = page.get_by_role("dialog", name="文件预览与保存")
