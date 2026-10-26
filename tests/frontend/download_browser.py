@@ -72,6 +72,7 @@ def check(browser, url):
     dialog = page.get_by_role("dialog", name="文件预览与保存")
     dialog.wait_for(timeout=2000)
     assert dialog.locator('video').count() == 1
+    assert dialog.locator('.file-preview-content').bounding_box()['height'] > 100, 'download actions must not collapse the player'
     assert len(context.pages) == 1, 'preview must not open a bare file tab'
 
     dialog.get_by_role("button", name="返回 Easel").click()
