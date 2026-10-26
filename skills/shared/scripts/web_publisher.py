@@ -17,6 +17,9 @@
 ⚠️ 选择器时效性：各平台网页改版频繁，内置选择器为**最佳努力**，**首次使用需人工校验/更新**
    （见各平台 config 的 selector_caveat 与 SKILL 文档）。发布前务必先 `plan` 预览、`login` 目视确认。
 
+视频号草稿：publish --draft 默认仅预览，加 --exec 才上传并单次保存草稿；
+其它平台拒绝 --draft。草稿不写发布日历，结果未知须人工核对后再决定是否重试。
+
 子命令：
     platforms  列出支持平台
     plan       解析并打印某平台的发布步骤（dry-run，不开浏览器）
@@ -42,6 +45,8 @@ import login_qr
 import login_transport
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快手已接入，注册表见 _READBACK_VERIFIERS）
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from easel.timeouts import TIMEOUT_CHANNELS_DRAFT_READY, TIMEOUT_CHANNELS_DRAFT_RESULT
 import human_pace  # noqa: E402  人类节奏（提交前双停顿；EASEL_PACE_SKIP=1 跳过）
 
 # ── 平台配置注册表 ────────────────────────────────────────────────────
@@ -343,6 +348,9 @@ def cmd_plan(a) -> int:
            "desc": a.desc or "<desc>", "tags": a.tags or "", "cover": a.cover or ""}
     steps = _resolve_steps(a.platform, ctx, _steps_key_for(PLATFORMS.get(a.platform, {}), a.media))
     cfg = PLATFORMS[a.platform]
+    if getattr(a, "draft", False):
+        print("视频号草稿预览：上传视频 → 填写简介 → 单次点击存草稿 → 等待明确保存提示；不发布、不登记发布日历。")
+        return 0
     print(f"平台：{cfg['name']}（{a.platform}）")
     print(f"登录页：{cfg['login_url']}")
     print(f"⚠️ 选择器提示：{cfg['selector_caveat']}\n")
@@ -521,6 +529,46 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
     page.wait_for_timeout(3000)
 
 
+def _draft_weixin_channels(page, ctx: dict) -> None:
+    """Submit a draft once; ambiguous outcomes require manual reconciliation."""
+    if not ctx.get("media"):
+        raise RuntimeError("视频号存草稿需要视频文件（--media）")
+    page.goto("https://channels.weixin.qq.com/platform/post/list", wait_until="domcontentloaded")
+    cfg = PLATFORMS["weixin-channels"]
+    _settle_login(page, cfg)
+    if not _is_logged_in(page, cfg):
+        raise RuntimeError("视频号未登录，请先在账号页扫码登录")
+    page.get_by_text("发表视频", exact=True).first.click()
+    page.wait_for_url("**/post/create")
+    page.locator("input[type=file]").set_input_files(ctx["media"])
+    description = "\n".join(ctx.get(key) or "" for key in ("title", "desc", "tags")).strip()
+    deadline = time.monotonic() + TIMEOUT_CHANNELS_DRAFT_READY
+    button = None
+    frame = None
+    while time.monotonic() < deadline:
+        frame = next((f for f in page.frames if "micro/content/post/create" in (f.url or "")), None)
+        if frame is not None:
+            candidate = frame.get_by_role("button", name="存草稿", exact=True)
+            if candidate.count() == 1 and candidate.is_visible() and candidate.is_enabled():
+                button = candidate
+                break
+        page.wait_for_timeout(500)
+    if button is None:
+        raise RuntimeError("未找到可用的存草稿按钮，未提交")
+    editor = frame.locator("div.input-editor")
+    editor.fill(description)
+    # Match explicit result notices, never the ordinary button or arbitrary dialogs.
+    notice = frame.get_by_text(re.compile(r"^(?:已存草稿|草稿已保存|已保存到草稿箱?|保存草稿成功)$"))
+    if notice.count() and notice.first.is_visible():
+        raise RuntimeError("页面已有草稿成功提示，无法区分本次操作；未提交，请刷新后核对")
+    try:
+        button.click()
+        notice.first.wait_for(state="visible", timeout=TIMEOUT_CHANNELS_DRAFT_RESULT * 1000)
+    except Exception as error:
+        raise RuntimeError("视频号草稿结果未知，请在作品管理的草稿栏人工核对；不要直接重试。") from error
+    print("视频号返回草稿保存成功提示（未发布；未核验草稿列表）。", file=sys.stderr)
+
+
 # ── 发布读回对账（platform_readback）──────────────────────────────────
 # 配 readback 的平台：发布后回创作者后台读本人作品列表对账（标题+时间窗）——
 # 平台侧证据才是权威成功判定，界面判定（URL/toast）只作旁证。
@@ -590,7 +638,8 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
     profile.mkdir(parents=True, exist_ok=True)
     cfg = PLATFORMS[a.platform]
     ctx = {"media": a.media or "", "title": a.title or "", "desc": a.desc or "",
-           "tags": a.tags or "", "cover": a.cover or ""}
+           "tags": a.tags or "", "cover": a.cover or "",
+           "draft": bool(getattr(a, "draft", False))}
     with sync_playwright() as p:
         browser = p.chromium.launch_persistent_context(
             str(profile), headless=not headed, args=LAUNCH_ARGS + ["--no-proxy-server"],
@@ -636,6 +685,13 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
         # 避免后续 upload 因发布态失效而晦涩超时。仅明确失效才拦，瞬时错误放行。
         if cfg.get("login_probe") and _probe_publish_auth(page, cfg) == "expired":
             _die(f"{cfg['name']}登录态已失效（发布子系统未授权）：外壳虽显示已登录，但发布上传鉴权已过期。请在账号页重新扫码登录后重试。", 6)
+        # 视频号存草稿：独立流程（不走真发布的读回/成功校验链路），存完即收工
+        if a.platform == "weixin-channels" and getattr(a, "draft", False):
+            try:
+                _draft_weixin_channels(page, ctx)
+            finally:
+                browser.close()
+            return 0
         # 读回平台：发前快照（读回时排除旧作品的硬证据；失败不影响发布）
         snapshot_ids: set[str] = set()
         if cfg.get("readback"):
@@ -1490,6 +1546,8 @@ def cmd_login_qr(a) -> int:
 
 
 def cmd_publish(a) -> int:
+    if getattr(a, "draft", False) and a.platform != "weixin-channels":
+        _die("--draft 仅支持视频号；其它平台不会执行任何发布动作")
     if not a.media and a.platform != "zhihu":
         _die("--media 媒体文件必填")
     if a.media and not Path(a.media).expanduser().is_file():
@@ -1513,7 +1571,7 @@ def cmd_publish(a) -> int:
                                allow_unsafe=getattr(a, "allow_unsafe", False),
                                label=f"{cfg.get('name', a.platform)}发布内容")
     rc = _run_browser(a, headed=a.headed, do_publish=True)
-    if rc == 0:
+    if rc == 0 and not getattr(a, "draft", False):
         # 发布成功 → 落统一内容日历（对话页自动；发布页 web 设 AUTORECORD=0 跳过防重复）
         try:
             import calendar_ops
@@ -1751,6 +1809,7 @@ def main() -> int:
     p.add_argument("--allow-unsafe", action="store_true",
                    help="放行内容安全闸门（检出内部设置泄露也照发，谨慎）")
     p.add_argument("--headed", action="store_true", help="有头模式执行（便于观察/首次校验）")
+    p.add_argument("--draft", action="store_true", help="仅视频号：存草稿不发布")
     p.add_argument("--keep-open", action="store_true", help="发布后不关闭浏览器")
     p.set_defaults(func=cmd_publish)
 
