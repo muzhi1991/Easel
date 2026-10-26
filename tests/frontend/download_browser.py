@@ -63,21 +63,35 @@ def check(browser, url):
     page.get_by_text("Download regression", exact=True).click()
     control = page.locator('.artifact-gallery .download-control')
     control.wait_for()
+    draft = page.locator('textarea').last
+    draft.fill('Download return must preserve this draft')
+    draft.blur()
+    page.wait_for_timeout(800)  # Let the existing mobile viewport focus-settle finish.
+    # PWA raw-media navigation must retain an app-owned return control.
+    page.get_by_role("link", name="打开 ↗").click()
+    dialog = page.get_by_role("dialog", name="文件预览与保存")
+    dialog.wait_for(timeout=2000)
+    assert dialog.locator('video').count() == 1
+    assert len(context.pages) == 1, 'preview must not open a bare file tab'
+
+    dialog.get_by_role("button", name="返回 Easel").click()
+    assert page.url.rstrip('/') == url.rstrip('/')
+    assert draft.input_value() == 'Download return must preserve this draft'
     assert control.get_by_role("button", name="下载", exact=True).count() == 0
     control.get_by_role("button", name="准备分享/保存", exact=True).click()
     control.get_by_role("button", name="分享/保存", exact=True).click(timeout=15000)
     assert page.evaluate("window.savedFile") == {"size": size, "name": "final.mp4"}
-    control.get_by_role("button", name="复制下载链接").click()
+    control.get_by_role("button", name="复制链接到 Safari 下载").click()
     page.wait_for_function("window.copiedLink")
     assert page.evaluate("window.copiedLink").endswith('/api/media/project/final.mp4?download=true')
     page.evaluate("window.denyClipboard = true")
-    control.get_by_role("button", name="复制下载链接").click()
+    control.get_by_role("button", name="复制链接到 Safari 下载").click()
     field = control.get_by_role("textbox", name="下载链接")
     field.wait_for()
     assert field.input_value().endswith('?download=true')
     # A failed browser handoff must leave native saving reachable.
     page.route("**/api/media/project/final.mp4?download=true", lambda route: route.abort())
-    control.get_by_role("link", name="使用浏览器下载").click()
+    assert control.get_by_role("link", name="使用浏览器下载").count() == 0
     control.get_by_role("button", name="准备分享/保存", exact=True).click()
     control.get_by_role("button", name="分享/保存", exact=True).click(timeout=15000)
     assert page.evaluate("window.savedFile.size") == size

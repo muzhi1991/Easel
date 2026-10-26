@@ -875,6 +875,25 @@ def _skill_api_configured(skill: str, env: dict[str, str] | None = None) -> bool
     if not spec:
         return True
     env = _read_env() if env is None else env
+    channel = {"ai-image-gen": "image", "ecom-details-image": "image",
+               "short-drama": "image", "ai-video-gen": "video", "ai-music": "music"}.get(skill)
+    if channel:
+        selected_default = False
+        try:
+            rt = _media_runtime()
+            if rt.load()["defaults"].get(channel):
+                selected_default = True
+                # A configured default takes precedence over legacy providers,
+                # just as it does during execution. This is an offline check.
+                instance, adapter = rt.resolve(channel)
+                effective_env = {**env, **os.environ}
+                return all(_is_set(effective_env.get(instance["settings"].get(field["key"], "")))
+                           for field in adapter.descriptor["fields"]
+                           if field["type"] == "secret_ref"
+                           and (field.get("required") or instance["settings"].get(field["key"])))
+        except (RuntimeError, ValueError, OSError):
+            if selected_default:
+                return False
     for prov in spec['providers']:
         if all(_key_configured(k, env) for k in prov['keys'] if k['required']):
             return True

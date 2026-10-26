@@ -8,6 +8,10 @@ export type DownloadState = {
   phase: 'connecting' | 'receiving' | 'ready' | 'sharing' | 'done' | 'cancelled' | 'error' | 'browser';
   received: number; total?: number; speed: number; started: number; lastData: number; message: string;
 };
+export function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
 let owner: symbol | undefined;
 export function browserDownloadUrl(url: string, origin: string): string {
   const parsed = new URL(url, origin);
@@ -108,6 +112,8 @@ export class DownloadTask {
         const link = document.createElement('a');
         link.href = this.objectUrl;
         link.download = this.file.name;
+        link.target = '_blank';
+        link.rel = 'noopener';
         document.body.append(link);
         link.click();
         link.remove();

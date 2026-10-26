@@ -110,7 +110,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
             <div className="panel">
               <div className="panel-title">🔑 {detail.apiSpec.label} · API 配置
                 <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 12 }}>
-                  （任选一个服务商填齐即可用）
+                  （已配置默认媒体实例时可直接使用；以下为原供应商配置）
                 </span>
               </div>
               {detail.apiSpec.settings.length > 0 && (
