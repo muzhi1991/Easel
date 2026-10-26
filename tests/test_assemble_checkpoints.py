@@ -20,7 +20,7 @@ def assembly(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "_renderer_identity", lambda: {"version": "test renderer 1"})
     monkeypatch.setattr(module, "_validate_shot_clip", lambda *args: None)
     # Fake ffmpeg only materializes local outputs; cache/locks/files are real.
-    monkeypatch.setattr(module, "_run", lambda cmd: Path(cmd[-1]).write_bytes(b"assembled video"))
+    monkeypatch.setattr(module, "_run", lambda cmd, **kwargs: Path(cmd[-1]).write_bytes(b"assembled video"))
     root = tmp_path / "outputs" / "恢复演示"
     root.mkdir(parents=True)
     images = [root / "first.png", root / "second.png"]
@@ -95,7 +95,7 @@ def test_caption_change_reuses_clips_but_regenerates_delivery(assembly, monkeypa
     data["shots"][0]["caption"] = "new caption"
     storyboard.write_text(json.dumps(data), encoding="utf-8")
     commands = []
-    def render(cmd):
+    def render(cmd, **kwargs):
         commands.append(cmd)
         Path(cmd[-1]).write_bytes(b"new subtitled video")
     monkeypatch.setattr(module, "_run", render)
@@ -112,7 +112,7 @@ def test_final_render_failure_preserves_delivered_file_and_completed_clips(assem
     Path(args.storyboard).write_text(json.dumps(data), encoding="utf-8")
     Path(args.output).write_bytes(b"old delivered video")
     original = module._run
-    def fail(cmd):
+    def fail(cmd, **kwargs):
         if "-vf" in cmd:
             Path(cmd[-1]).write_bytes(b"incomplete subtitle render")
             raise RuntimeError("interrupted final render")

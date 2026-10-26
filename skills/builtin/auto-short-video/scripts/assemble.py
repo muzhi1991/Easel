@@ -55,9 +55,11 @@ def _check_ffmpeg():
             fail(f"未找到 {tool}，请先安装 ffmpeg。", 3)
 
 
-def _run(cmd: list[str]):
-    r = subprocess.run(cmd, capture_output=True, text=True)
+def _run(cmd: list[str], *, cwd=None):
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if r.returncode != 0:
+        if "No such filter" in (r.stderr or "") and "subtitles" in (r.stderr or ""):
+            fail("当前 ffmpeg 未提供 subtitles 滤镜；请安装带 libass 的构建后重试。", 4)
         tail = "\n".join((r.stderr or "").splitlines()[-12:])
         fail(f"ffmpeg 执行失败：\n{tail}", 4)
 
@@ -554,10 +556,13 @@ def cmd_assemble(args) -> int:
                             font=getattr(args, "sub_font", None) or DEFAULT_SUB_FONT,
                             font_size=getattr(args, "sub_size", None),
                             margin_v=getattr(args, "sub_margin_v", None))
-            escaped = str(ass_path).replace("'", "\\'").replace(":", "\\:")
-            _run(["ffmpeg", "-y", "-i", str(stage),
-                  "-vf", f"subtitles='{escaped}'",
-                  "-c:a", "copy", str(delivery)])
+            # A fixed relative filter filename avoids both FFmpeg escaping layers.
+            # Keep media paths absolute when changing the child working directory.
+            burn_in = workdir / "burn-in.ass"
+            shutil.copyfile(ass_path, burn_in)
+            _run(["ffmpeg", "-y", "-i", str(stage.resolve()),
+                  "-vf", "subtitles=filename=burn-in.ass",
+                  "-c:a", "copy", str(delivery.resolve())], cwd=workdir)
         else:
             shutil.copy(str(stage), str(delivery))
 

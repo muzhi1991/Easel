@@ -19,6 +19,7 @@ import re
 import signal
 import sys
 import time
+import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -146,6 +147,34 @@ def _proxy(explicit, disable):
     return None
 
 
+def _save_storage(ctx, profile):
+    """Persist cookies only for the locked browser profile, private from creation."""
+    path = Path(profile) / ".easel-cookies.json"
+    temporary = None
+    try:
+        data = {"cookies": ctx.cookies()}
+        fd, temporary = tempfile.mkstemp(prefix=".easel-cookies-", dir=profile)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False)
+        os.replace(temporary, path)
+    except Exception as error:
+        print(f"公众号登录 cookies 保存失败（{type(error).__name__}），下次可能需要重新登录。", file=sys.stderr)
+    finally:
+        if temporary and Path(temporary).exists():
+            Path(temporary).unlink()
+
+
+def _restore_storage(ctx, profile):
+    path = Path(profile) / ".easel-cookies.json"
+    try:
+        if path.is_file():
+            cookies = json.loads(path.read_text(encoding="utf-8")).get("cookies", [])
+            if cookies:
+                ctx.add_cookies(cookies)
+    except Exception as error:
+        print(f"公众号登录 cookies 恢复失败（{type(error).__name__}），请重新登录。", file=sys.stderr)
+
+
 def _launch(p, headed, base, proxy):
     prof = _profile_dir(base)
     prof.mkdir(parents=True, exist_ok=True)
@@ -161,10 +190,12 @@ def _launch(p, headed, base, proxy):
     except Exception:
         _unlock_profile(lock)
         raise
+    _restore_storage(ctx, prof)
     original_close = ctx.close
 
     def close(*args, **kwargs):
         try:
+            _save_storage(ctx, prof)
             return original_close(*args, **kwargs)
         finally:
             _unlock_profile(lock)

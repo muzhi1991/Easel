@@ -25,3 +25,6 @@ TIMEOUT_GATEWAY_CHECK = 5  # Web 运行时检查专用网关的间隔
 TIMEOUT_GATEWAY_PROBE = 3  # 专用网关 HTTP 健康探测
 TIMEOUT_GATEWAY_START = 90  # 包含适配器及网关冷启动的上限
 TIMEOUT_WEB_SHUTDOWN = 10  # 托管 Web 子进程收到停止信号后的等待上限
+
+TIMEOUT_CHANNELS_DRAFT_READY = 300  # 视频号上传转码与草稿按钮就绪
+TIMEOUT_CHANNELS_DRAFT_RESULT = 20  # 单次草稿提交的结果提示；超时不重投
