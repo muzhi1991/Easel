@@ -44,17 +44,18 @@ def _number(value: str) -> float | None:
         return None
 
 
-def parse_feed(body: bytes) -> tuple[list[dict], int | None]:
+def parse_feed(body: bytes, source_map: dict[str, str] | None = None) -> tuple[list[dict], int | None]:
     if len(body) > MAX_FEED_BYTES or b"<!DOCTYPE" in body.upper() or b"<!ENTITY" in body.upper():
         raise ValueError("Invalid RSS document")
     channel = ET.fromstring(body).find("channel")
     if channel is None:
         raise ValueError("RSS channel missing")
+    source_map = source_map if source_map is not None else {key: key for key in SOURCES}
     items, seen = [], set()
     for node in channel.findall("item"):
         source, title, url = _text(node, "source"), _text(node, "title"), _text(node, "link")
         identity = _text(node, "guid") or url
-        if source not in SOURCES or not title or not url.startswith(("https://", "http://")):
+        if source not in source_map or not title or not url.startswith(("https://", "http://")):
             continue
         if identity in seen:
             continue
@@ -65,7 +66,7 @@ def parse_feed(body: bytes) -> tuple[list[dict], int | None]:
             if value is not None:
                 metrics[key] = value
         items.append({
-            "id": identity, "source": source, "title": title, "url": url,
+            "id": identity, "source": source_map[source], "title": title, "url": url,
             "publisher": _text(node, "publisher"), "author": _text(node, "author"),
             "summary": _text(node, "description"), "published_at": _timestamp(_text(node, "pubDate")),
             "heat_score": _number(_text(node, "heat/heat_score")), "metrics": metrics,
@@ -74,10 +75,14 @@ def parse_feed(body: bytes) -> tuple[list[dict], int | None]:
 
 
 class OverseasFeed:
-    """One download/cache shared by all three source cards and concurrent page requests."""
+    """One subscription cache shared by its source cards and concurrent requests."""
 
-    def __init__(self, env_file: Path):
+    def __init__(self, env_file: Path, *, config_key: str = "EASEL_OVERSEAS_RSS_URL",
+                 sources: dict[str, str] | None = None, source_map: dict[str, str] | None = None):
         self.env_file = env_file
+        self.config_key = config_key
+        self.sources = dict(SOURCES if sources is None else sources)
+        self.source_map = dict(source_map if source_map is not None else {key: key for key in self.sources})
         self._lock = threading.Lock()
         self._url = ""
         self._items: list[dict] = []
@@ -109,7 +114,7 @@ class OverseasFeed:
     def get(self) -> dict:
         with self._lock:
             settings = read_settings(self.env_file)
-            url = settings.get("EASEL_OVERSEAS_RSS_URL", "").strip()
+            url = settings.get(self.config_key, "").strip()
             if url != self._url:
                 self._url, self._items, self._etag = url, [], ""
                 self._fetched_at, self._checked_at, self._feed_updated_at, self._error = 0, 0, None, ""
@@ -119,7 +124,7 @@ class OverseasFeed:
                     downloaded = self._download(url, settings)
                     if downloaded is not None:
                         body, etag = downloaded
-                        items, feed_updated_at = parse_feed(body)
+                        items, feed_updated_at = parse_feed(body, self.source_map)
                         self._items, self._feed_updated_at, self._etag = items, feed_updated_at, etag
                     self._fetched_at, self._error = int(time.time()), ""
                 except Exception:
@@ -132,7 +137,7 @@ class OverseasFeed:
                 "fetched_at": self._fetched_at or None, "feed_updated_at": self._feed_updated_at,
                 "groups": [{"source": key, "label": label,
                             "items": [item for item in self._items if item["source"] == key]}
-                           for key, label in SOURCES.items()],
+                           for key, label in self.sources.items()],
             }
 
 
@@ -143,5 +148,12 @@ def create_router(env_file: Path) -> APIRouter:
     @router.get("/api/overseas-trends")
     def overseas_trends():
         return feed.get()
+
+    ithome_feed = OverseasFeed(env_file, config_key="EASEL_ITHOME_RSS_URL",
+                               sources={"ithome": "IT之家"}, source_map={"news": "ithome"})
+
+    @router.get("/api/ithome-trends")
+    def ithome_trends():
+        return ithome_feed.get()
 
     return router

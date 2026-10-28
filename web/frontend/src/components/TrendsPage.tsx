@@ -5,6 +5,8 @@ import { IconFire, IconRefresh, IconBookmark, IconCheck } from './icons';
 import { OverseasChannels, OverseasCards } from '../features/overseas-trends/OverseasTrends';
 import { useOverseasTrends } from '../features/overseas-trends/useOverseasTrends';
 
+import { ithomeConfig } from '../features/overseas-trends/api';
+
 interface TrendsPageProps {
   onUseTopic: (title: string) => void;   // 一键做成内容 → 跳 chat
 }
@@ -20,6 +22,7 @@ const ALL_PLATFORMS: { key: string; label: string }[] = [
 
 export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
   const overseas = useOverseasTrends();
+  const ithome = useOverseasTrends(ithomeConfig);
   const [selected, setSelected] = useState<string[]>(['weibo', 'douyin', 'zhihu']);
   const [groups, setGroups] = useState<TrendGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,8 +63,8 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
             {updated > 0 && <span style={{ color: 'var(--text-tertiary)' }}> · {new Date(updated * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 更新</span>}
           </p>
         </div>
-        <button className="btn btn-sm" onClick={() => { load(selected); overseas.refresh(); }} disabled={loading || overseas.loading}>
-          <IconRefresh size={14} /> {loading || overseas.loading ? '刷新中…' : '刷新'}
+        <button className="btn btn-sm" onClick={() => { load(selected); overseas.refresh(); ithome.refresh(); }} disabled={loading || overseas.loading || ithome.loading}>
+          <IconRefresh size={14} /> {loading || overseas.loading || ithome.loading ? '刷新中…' : '刷新'}
         </button>
       </div>
 
@@ -71,6 +74,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
             onClick={() => toggle(p.key)}>{p.label}</button>
         ))}
         <OverseasChannels feed={overseas} />
+        <OverseasChannels feed={ithome} />
       </div>
 
       {error && <div className="notice-error">{error}</div>}
@@ -105,6 +109,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
           </div>
         ))}
         <OverseasCards feed={overseas} onUseTopic={onUseTopic} />
+        <OverseasCards feed={ithome} onUseTopic={onUseTopic} />
       </div>
     </div>
   );

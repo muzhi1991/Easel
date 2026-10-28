@@ -2,13 +2,12 @@ import { useState } from 'react';
 import DOMPurify from 'dompurify';
 import { createIdea } from '../../lib/api';
 import { IconBookmark, IconCheck } from '../../components/icons';
-import { overseasSources } from './api';
 import type { OverseasItem } from './api';
 import type { OverseasState } from './useOverseasTrends';
 import './overseas-trends.css';
 
 export function OverseasChannels({ feed }: { feed: OverseasState }) {
-  return <>{overseasSources.map(({ key, label }) =>
+  return <>{feed.config.sources.map(({ key, label }) =>
     <button key={key} className={`chip ${feed.selected.includes(key) ? 'active' : ''}`}
       aria-pressed={feed.selected.includes(key)} onClick={() => feed.toggle(key)}>{label}</button>)}</>;
 }
@@ -73,7 +72,7 @@ function OverseasRow({ item, saved, onSaved, onUseTopic }: {
 export function OverseasCards({ feed, onUseTopic }: { feed: OverseasState; onUseTopic: (text: string) => void }) {
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const markSaved = (id: string) => setSaved((previous) => new Set(previous).add(id));
-  return <>{overseasSources.filter(({ key }) => feed.selected.includes(key)).map(({ key, label }) => {
+  return <>{feed.config.sources.filter(({ key }) => feed.selected.includes(key)).map(({ key, label }) => {
     const items = feed.data?.groups.find((group) => group.source === key)?.items ?? [];
     const unavailable = feed.error || feed.data?.error;
     return <section className="card trend-col overseas-card" key={key} aria-label={`${label}热点`} aria-busy={feed.loading}>
@@ -82,7 +81,7 @@ export function OverseasCards({ feed, onUseTopic }: { feed: OverseasState; onUse
       </div>
       {feed.data?.feed_updated_at && <p className="overseas-status">订阅更新 {dateLabel(feed.data.feed_updated_at)}</p>}
       {feed.data?.fetched_at && <p className="overseas-status">最近获取 {dateLabel(feed.data.fetched_at)}</p>}
-      {feed.data && !feed.data.configured && <p className="overseas-status">尚未配置海外订阅，请在本机配置后刷新。</p>}
+      {feed.data && !feed.data.configured && <p className="overseas-status">尚未配置{feed.config.label}订阅，请在本机配置后刷新。</p>}
       {unavailable && <p className="overseas-status overseas-error" role="alert">{unavailable}{items.length > 0 ? ' 当前显示上次获取的内容。' : ''}</p>}
       {!feed.loading && !unavailable && feed.data?.configured && items.length === 0 && <p className="overseas-status">本期订阅暂无该来源内容。</p>}
       <ol className="overseas-list">{items.map((item) => <OverseasRow key={item.id} item={item}

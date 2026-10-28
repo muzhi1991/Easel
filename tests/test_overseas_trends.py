@@ -160,3 +160,40 @@ def test_route_unconfigured_is_read_only(tmp_path, monkeypatch):
     assert response.json()['configured'] is False
     assert [g['source'] for g in response.json()['groups']] == ['x', 'reddit', 'news']
     assert not (tmp_path / '.env').exists()
+
+
+def test_ithome_mapping_preserves_order_and_deduplication():
+    items, _ = rss.parse_feed(feed(item('b', 'news', '<heat_score>11.88</heat_score>', publisher='IT之家·24h热榜'),
+                                   item('a', 'news'), item('b', 'news'), item('x', 'x')),
+                              {'news': 'ithome'})
+    assert [i['id'] for i in items] == ['b', 'a']
+    assert all(i['source'] == 'ithome' for i in items)
+    assert items[0]['heat_score'] == 11.88
+    assert items[0]['publisher'] == 'IT之家·24h热榜'
+
+
+def test_ithome_route_cache_and_configuration_are_independent(tmp_path, monkeypatch):
+    monkeypatch.delenv('EASEL_OVERSEAS_RSS_URL', raising=False)
+    monkeypatch.delenv('EASEL_ITHOME_RSS_URL', raising=False)
+    env = tmp_path / '.env'
+    env.write_text('EASEL_OVERSEAS_RSS_URL=https://example.com/overseas\nEASEL_ITHOME_RSS_URL=https://example.com/ithome\n')
+    calls = []
+    def download(self, url, settings):
+        calls.append(url)
+        return feed(item(url, 'news')), url
+    monkeypatch.setattr(rss.OverseasFeed, '_download', download)
+    app = FastAPI()
+    app.include_router(rss.create_router(env))
+    with TestClient(app) as client:
+        overseas = client.get('/api/overseas-trends').json()
+        ithome = client.get('/api/ithome-trends').json()
+        assert ithome['groups'][0]['source'] == 'ithome'
+        assert ithome['groups'][0]['items'][0]['id'].endswith('/ithome')
+        assert overseas['groups'][2]['items'][0]['id'].endswith('/overseas')
+        assert len(calls) == 2
+        client.get('/api/ithome-trends')
+        client.get('/api/overseas-trends')
+        assert len(calls) == 2
+        env.write_text('EASEL_OVERSEAS_RSS_URL=https://example.com/overseas\n')
+        assert client.get('/api/ithome-trends').json()['configured'] is False
+        assert client.get('/api/overseas-trends').json() == overseas
