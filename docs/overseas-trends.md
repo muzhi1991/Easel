@@ -31,3 +31,22 @@ python -m pytest tests/test_overseas_trends.py tests/test_trends.py
 ```
 
 发布按 [Fork 维护流程](fork-maintenance.md) 执行；前端需要重新构建，服务更新前确认无生成中的会话。无需同步 Agent 技能。
+
+## IT之家订阅
+
+热点雷达另提供「IT之家」渠道，使用本机 `.env` 中的 `EASEL_ITHOME_RSS_URL`。
+个人 URL 不提交 Git；留空停用。订阅格式与海外源相同，入口把 `source=news`
+映射为 `ithome`，不要求生成端修改。保留混合资讯/热榜的订阅顺序、publisher
+标记与综合分，不将列表宣称为官方排名。
+
+`/api/ithome-trends` 复用 RSS 解析和获取类，但使用独立实例，缓存、ETag、失败状态
+与海外源隔离。前端复用渠道按钮、卡片和请求 hook。收藏和「做内容」均携带标题、
+来源、发布时间、纯文本摘要与原文链接；「做内容」通过原有回调新建会话并发送创作请求。
+
+浏览器回归（先启动本 worktree 的 Vite，端口 5189；以下命令在 `docs/` 执行；
+仅模拟 API，不调用真实模型）：
+
+```bash
+python ../tests/frontend/overseas_trends_browser.py
+python ../tests/frontend/ithome_trends_browser.py
+```
