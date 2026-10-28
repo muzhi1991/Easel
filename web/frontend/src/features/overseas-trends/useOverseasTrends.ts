@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useChannelSelection } from '../../lib/useChannelSelection';
 import { fetchOverseasTrends, overseasConfig } from './api';
 import type { OverseasSource, OverseasData, FeedConfig } from './api';
 
 export function useOverseasTrends(config: FeedConfig = overseasConfig) {
-  const [selected, setSelected] = useState<OverseasSource[]>([]);
+  const [selected, setSelected] = useChannelSelection<OverseasSource>(`easel_trends_${config.endpoint}`, config.sources.map(({ key }) => key), []);
   const [data, setData] = useState<OverseasData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
