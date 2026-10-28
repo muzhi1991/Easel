@@ -50,3 +50,6 @@ python -m pytest tests/test_overseas_trends.py tests/test_trends.py
 python ../tests/frontend/overseas_trends_browser.py
 python ../tests/frontend/ithome_trends_browser.py
 ```
+
+热点雷达的所有渠道选择保存在当前浏览器本地，刷新或重新进入页面时恢复，
+全部取消也会保留。首次使用仍默认选择微博、抖音、知乎；不同浏览器不互相同步。

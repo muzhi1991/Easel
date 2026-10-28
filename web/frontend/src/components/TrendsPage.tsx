@@ -5,6 +5,7 @@ import { IconFire, IconRefresh, IconBookmark, IconCheck } from './icons';
 import { OverseasChannels, OverseasCards } from '../features/overseas-trends/OverseasTrends';
 import { useOverseasTrends } from '../features/overseas-trends/useOverseasTrends';
 
+import { useChannelSelection } from '../lib/useChannelSelection';
 import { ithomeConfig } from '../features/overseas-trends/api';
 
 interface TrendsPageProps {
@@ -23,7 +24,7 @@ const ALL_PLATFORMS: { key: string; label: string }[] = [
 export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
   const overseas = useOverseasTrends();
   const ithome = useOverseasTrends(ithomeConfig);
-  const [selected, setSelected] = useState<string[]>(['weibo', 'douyin', 'zhihu']);
+  const [selected, setSelected] = useChannelSelection('easel_trends_domestic', ALL_PLATFORMS.map(({ key }) => key), ['weibo', 'douyin', 'zhihu']);
   const [groups, setGroups] = useState<TrendGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

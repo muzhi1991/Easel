@@ -33,6 +33,9 @@ def check(browser, base, mobile):
                 }]})
             data = {'configured': True, 'error': '', 'stale': False, 'fetched_at': 1792400400,
                     'feed_updated_at': 1792400000, 'groups': groups}
+        elif path.endswith('/api/ithome-trends'):
+            data = {'configured': True, 'error': '', 'stale': False, 'fetched_at': None,
+                    'feed_updated_at': None, 'groups': [{'source': 'ithome', 'label': 'IT之家', 'items': []}]}
         elif path.endswith('/api/trends'):
             data = {'trends': [{'platform': 'weibo', 'label': '微博', 'ok': True,
                                 'items': [{'title': '国内测试热搜', 'url': 'https://example.com', 'hot': '100万'}]}], 'updated': 1792400400}
@@ -68,6 +71,22 @@ def check(browser, base, mobile):
     assert 'https://example.com/x' in saved[0]['note'] and '中文摘要 & 内容' in saved[0]['note']
     x.get_by_role('button', name='做内容', exact=True).click()
     assert 'https://example.com/x' in page.evaluate('window.__overseasTopic')
+    # Selection survives browser reload, including explicit deselection of all channels.
+    page.get_by_role('button', name='微博', exact=True).click()
+    page.get_by_role('button', name='百度', exact=True).click()
+    page.get_by_role('button', name='IT之家', exact=True).click()
+    expected = ['抖音', '知乎', '百度', 'X', 'Reddit', '海外资讯', 'IT之家']
+    page.reload()
+    page.get_by_role('region', name='IT之家热点').wait_for()
+    assert page.locator('.trend-platforms .chip.active').all_text_contents() == expected
+    for label in expected:
+        page.get_by_role('button', name=label, exact=True).click()
+    page.reload()
+    page.get_by_role('button', name='IT之家', exact=True).wait_for()
+    assert page.locator('.trend-platforms .chip.active').count() == 0
+    page.get_by_role('button', name='微博', exact=True).click()
+    page.get_by_role('button', name='X', exact=True).click()
+    x.get_by_text('X测试标题', exact=True).wait_for()
     state['fail'] = True
     page.get_by_role('button', name='刷新', exact=True).click()
     x.get_by_role('alert').wait_for()
