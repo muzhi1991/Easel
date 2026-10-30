@@ -20,6 +20,7 @@ interface ChatPageProps {
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
   onSend: (displayText: string, attachments?: UploadedFile[]) => Promise<boolean>;
   onStop: () => void;
+  onRename: (messageIndex: number, artifactTitle?: string) => void;
   onResend: (
     userIndex: number,
     displayText: string,
@@ -44,7 +45,7 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ apiDirect, session, stream, historyLoading = false, readOnly = false, historyError, onLoadHistory, onThinkingChange, onSend, onStop, onResend, onQuestionAnswered, onQuestionClosed }: ChatPageProps) {
+export default function ChatPage({ apiDirect, session, stream, historyLoading = false, readOnly = false, historyError, onLoadHistory, onThinkingChange, onSend, onStop, onRename, onResend, onQuestionAnswered, onQuestionClosed }: ChatPageProps) {
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
@@ -342,6 +343,7 @@ export default function ChatPage({ apiDirect, session, stream, historyLoading = 
                 const prevUser = pi >= 0 && session.messages[pi]?.role === 'user' ? session.messages[pi] : null;
                 actions = {
                   onCopy: copy,
+                  onRename: () => onRename((session.messageStart || 0) + i, msg.artifactTitle),
                   onRetry: (isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,

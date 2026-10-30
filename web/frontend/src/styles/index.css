@@ -1589,3 +1589,14 @@ textarea.field { resize: vertical; min-height: 90px; }
   .profile-head { flex-wrap: wrap; }
   .profile-summary { padding: 18px; }
 }
+
+/* One shared naming dialog for history and delivered messages. */
+.rename-dialog { width: min(440px, calc(100vw - 32px)); }
+.rename-dialog .session-rename-input { width: 100%; box-sizing: border-box; font-size: 16px; }
+.rename-hint { font-size: 13px; color: var(--text-secondary); margin: 12px 0; }
+.rename-options, .rename-footer { display: flex; flex-wrap: wrap; gap: 8px; }
+.rename-footer { justify-content: flex-end; margin-top: 20px; }
+.rename-error { color: #d33; font-size: 13px; }
+
+.rename-overlay { top: var(--app-top, 0px); bottom: auto; height: var(--app-height, 100dvh); box-sizing: border-box; }
+.rename-dialog { max-height: 100%; overflow-y: auto; }

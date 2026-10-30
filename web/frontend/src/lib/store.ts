@@ -3,6 +3,7 @@ import type { UploadedFile, ChatQuestion, ThinkingLevel } from './api';
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  artifactTitle?: string;
   agentContent?: string; // 仅发给 Agent 的增强消息（如附件路径），不在对话页面展示
   attachments?: UploadedFile[]; // 结构化附件引用；用于历史展示、请求和重试
   thinking?: string;   // 模型思考过程（隐思考），流式结束后持久保留
@@ -17,6 +18,7 @@ export interface ChatSession {
   thinking?: ThinkingLevel;
   id: string;
   title: string;
+  titleLocked?: boolean;
   messages: ChatMessage[];
   messageCount?: number; // Server total, independent of the loaded window.
   messageStart?: number; // Absolute index of the first loaded message.

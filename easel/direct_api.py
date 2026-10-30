@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from easel.conversation_naming import TOOL as NAMING_TOOL
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_PROMPT = (
@@ -80,7 +81,7 @@ async def _sse_payloads(response: httpx.Response):
 
 async def stream_chat(settings: dict[str, str], content: str | list, *,
                       system: str = SYSTEM_PROMPT, history_file: Path | None = None,
-                      timeout: float = 300):
+                      timeout: float = 300, naming=None, thinking: str | None = None):
     """Yield (token/thinking/finish, text); persist only complete exchanges."""
     base, model, key = api_config(settings)
     history = []
@@ -94,6 +95,10 @@ async def stream_chat(settings: dict[str, str], content: str | list, *,
     user = {"role": "user", "content": content}
     body = {"model": model, "stream": True,
             "messages": [{"role": "system", "content": system}, *history, user]}
+    if naming is not None:
+        body['tools'] = [NAMING_TOOL]
+    if thinking and any(tag in model.lower() for tag in ('gpt-5', 'gpt-6', 'o3', 'o4')):
+        body['reasoning_effort'] = thinking
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     text = []
     finish_reason = None
@@ -102,34 +107,60 @@ async def stream_chat(settings: dict[str, str], content: str | list, *,
         # Redirects must never forward the credential to a different destination.
         async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
                                      timeout=httpx.Timeout(timeout, connect=10)) as client:
-            async with client.stream("POST", base + "/chat/completions",
-                                     json=body, headers=headers) as response:
-                if response.status_code != 200:
-                    raise DirectAPIError(f"API 返回 HTTP {response.status_code}，请检查地址、Key 和模型")
-                async for payload in _sse_payloads(response):
-                    if payload == "[DONE]":
-                        break
+            for attempt in range(4):
+                calls = {}
+                response_start = len(text)
+                async with client.stream("POST", base + "/chat/completions",
+                                         json=body, headers=headers) as response:
+                    if response.status_code != 200:
+                        raise DirectAPIError(f"API 返回 HTTP {response.status_code}，请检查地址、Key 和模型")
+                    async for payload in _sse_payloads(response):
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(payload)
+                            if not isinstance(event, dict) or event.get("error"):
+                                raise ValueError
+                            choices = event.get("choices") or []
+                            if not choices:
+                                continue  # usage-only event
+                            choice = choices[0]
+                            delta = choice.get("delta") or {}
+                            if delta.get("tool_calls"):
+                                if naming is None:
+                                    raise DirectAPIError("网关要求执行工具，但 API 直连模式没有本机执行工具")
+                                for fragment in delta['tool_calls']:
+                                    call = calls.setdefault(fragment['index'], {'id': '', 'type': 'function',
+                                        'function': {'name': '', 'arguments': ''}})
+                                    call['id'] += fragment.get('id', '')
+                                    for key in ('name', 'arguments'):
+                                        call['function'][key] += fragment.get('function', {}).get(key, '')
+                            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                            if isinstance(reasoning, str) and reasoning:
+                                yield "thinking", reasoning
+                            token = delta.get("content")
+                            if isinstance(token, str) and token:
+                                text.append(token)
+                                yield "token", token
+                            finish_reason = choice.get("finish_reason") or finish_reason
+                        except (ValueError, TypeError, KeyError, AttributeError):
+                            raise DirectAPIError("API 返回了错误或无法解析的流数据") from None
+                if finish_reason != 'tool_calls' or not calls:
+                    break
+                if attempt == 3:
+                    raise DirectAPIError('命名工具调用次数过多，请重试')
+                body['messages'].append({'role': 'assistant', 'content': ''.join(text[response_start:]) or None,
+                                         'tool_calls': list(calls.values())})
+                for call in calls.values():
+                    if call['function']['name'] != 'name_conversation':
+                        raise DirectAPIError('API 请求了不支持的工具')
                     try:
-                        event = json.loads(payload)
-                        if not isinstance(event, dict) or event.get("error"):
-                            raise ValueError
-                        choices = event.get("choices") or []
-                        if not choices:
-                            continue  # usage-only event
-                        choice = choices[0]
-                        delta = choice.get("delta") or {}
-                        if delta.get("tool_calls"):
-                            raise DirectAPIError("网关要求执行工具，但 API 直连模式没有本机执行工具")
-                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
-                        if isinstance(reasoning, str) and reasoning:
-                            yield "thinking", reasoning
-                        token = delta.get("content")
-                        if isinstance(token, str) and token:
-                            text.append(token)
-                            yield "token", token
-                        finish_reason = choice.get("finish_reason") or finish_reason
-                    except (ValueError, TypeError, KeyError, AttributeError):
-                        raise DirectAPIError("API 返回了错误或无法解析的流数据") from None
+                        result = naming(json.loads(call['function']['arguments']))
+                    except (ValueError, TypeError) as error:
+                        result = {'error': str(error)}
+                    body['messages'].append({'role': 'tool', 'tool_call_id': call['id'],
+                                             'content': json.dumps(result, ensure_ascii=False)})
+                finish_reason = None
     except httpx.TimeoutException:
         raise DirectAPIError("API 请求超时，请检查网关或重试") from None
     except httpx.HTTPError:

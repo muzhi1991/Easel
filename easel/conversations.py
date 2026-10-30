@@ -98,6 +98,7 @@ class Conversations:
                 # Retry of the same import is safe, but never overwrites newer data.
                 return None if row[1] else json.loads(row[0])
             data.update(source='server', revision=1)
+            data.setdefault('titleLocked', importing)
             data.pop('pendingTurnId', None)
             data['agentSessionId'] = identifier.removeprefix('shared_')
             if not importing:
@@ -115,6 +116,8 @@ class Conversations:
             if 'persona' in changes and changes['persona'] != data.get('persona') and data['messages']:
                 raise Conflict('已有对话的画像不能修改，请新建对话')
             data.update(changes)
+            if 'title' in changes:
+                data['titleLocked'] = True
             return self._put(db, data)
 
     @staticmethod
@@ -144,23 +147,38 @@ class Conversations:
                     raise Conflict('重试的消息已变化，请刷新后重试')
                 data['messages'] = data['messages'][:truncate_at]
                 data['historyEpoch'] = data.get('historyEpoch', 0) + 1
+            if not data['messages'] and not data.get('titleLocked', True):
+                data['title'] = title or data['title']
             data['messages'].append(message)
-            data['title'] = title or data['title']
             data['pendingTurnId'] = turn_id
             data['turnStarted'] = time.time()
             db.execute('INSERT INTO turns VALUES (?, ?)', (turn_id, identifier))
             return self._put(db, data)
 
-    def finish(self, identifier, turn_id, message, session_key=None):
+    def finish(self, identifier, turn_id, message, session_key=None, artifact_title=None):
         with self.transaction() as db:
             data = self._get(db, identifier)
             if data.get('pendingTurnId') != turn_id:
                 return data  # done + cleanup, or a replay: never append twice
+            if artifact_title:
+                message = {**message, 'artifactTitle': artifact_title}
+                if not data.get('titleLocked', True):
+                    data['title'] = artifact_title
             data['messages'].append(message)
             data.pop('pendingTurnId', None)
             data.pop('turnStarted', None)
             if session_key:
                 data['sessionKey'] = session_key
+            return self._put(db, data)
+
+    def rename_turn(self, identifier, turn_id, title, expected_title=None):
+        with self.transaction() as db:
+            data = self._get(db, identifier)
+            if data.get('pendingTurnId') != turn_id:
+                raise Conflict('命名请求已过期，请在当前对话重试')
+            if expected_title is not None and data.get('titleLocked', True) and data['title'] != expected_title:
+                raise Conflict('你已主动修改名称，本轮较早的命名请求不会覆盖它')
+            data.update(title=title, titleLocked=True)
             return self._put(db, data)
 
     def recover(self, jobs_dir):

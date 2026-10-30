@@ -24,7 +24,7 @@ interface SidebarProps {
   activeSessionId: string | null;
   onSessionSelect: (id: string) => void;
   onSessionDelete: (id: string) => void;
-  onSessionRename: (id: string, title: string) => void;
+  onSessionRename: (id: string) => void;
   onSessionArchive: (id: string, archived: boolean) => void;
   onNewChat: () => void;
   gatewayStatus: string;
@@ -63,48 +63,22 @@ export default function Sidebar({
   agentRuntime,
   onOpenSettings,
 }: SidebarProps) {
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
   const [showArchived, setShowArchived] = useState(false);
-
-  const startRename = (s: ChatSession) => { setRenamingId(s.id); setRenameValue(s.title); };
-  const commitRename = () => {
-    if (renamingId) onSessionRename(renamingId, renameValue);
-    setRenamingId(null);
-  };
 
   const active = sessions.filter((s) => !s.archived && ((s.messageCount ?? s.messages.length) > 0 || s.id === activeSessionId));
   const archived = sessions.filter((s) => s.archived);
 
   const renderItem = (s: ChatSession, isArchived: boolean) => {
-    if (renamingId === s.id) {
-      return (
-        <div key={s.id} className="session-item">
-          <input
-            className="session-rename-input"
-            value={renameValue}
-            autoFocus
-            onChange={(e) => setRenameValue(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              else if (e.key === 'Escape') setRenamingId(null);
-            }}
-            onBlur={commitRename}
-          />
-        </div>
-      );
-    }
     return (
       <div
         key={s.id}
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => onSessionSelect(s.id)}
       >
-        <span className="session-item-title">{s.title}{s.source !== 'server' && <small className="local-history-badge">本地旧记录</small>}</span>
+        <span className="session-item-title" title={s.title}>{s.title}{s.source !== 'server' && <small className="local-history-badge">本地旧记录</small>}</span>
         <div className="session-actions">
           <button className="session-act" title="重命名"
-            onClick={(e) => { e.stopPropagation(); startRename(s); }}><IconEdit size={14} /></button>
+            onClick={(e) => { e.stopPropagation(); onSessionRename(s.id); }}><IconEdit size={14} /></button>
           <button className="session-act" title={isArchived ? '取消归档' : '归档'}
             onClick={(e) => { e.stopPropagation(); onSessionArchive(s.id, !isArchived); }}>
             {isArchived ? <IconUnarchive size={14} /> : <IconArchive size={14} />}

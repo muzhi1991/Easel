@@ -527,3 +527,34 @@ oc_set() { printf '%s\\n' "$3" > "$PROVIDER_CAPTURE"; }
                                  "PROJECT_ROOT": str(tmp_path)}, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert env_file.read_text() == "EASEL_CHAT_TRANSPORT=http\n"
+
+
+def test_shared_api_naming_tool_roundtrip_and_manual_priority(sandbox, monkeypatch):
+    sandbox.post('/api/conversations', json={'id': 'shared_naming', 'title': '临时', 'created': 1})
+    calls = []
+    mode = 'manual'
+    def respond(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        assert body['tools'][0]['function']['name'] == 'name_conversation'
+        if body['messages'][-1]['role'] != 'tool':
+            return httpx.Response(200, text=sse(chunk(tool_calls=[{
+                'index': 0, 'id': 'call_1', 'type': 'function',
+                'function': {'name': 'name_conversation', 'arguments': json.dumps({
+                    'mode': mode, 'title': '指定的名称' if mode == 'manual' else '另一篇文章'})}}]),
+                chunk(finish='tool_calls'), '[DONE]'))
+        result = json.loads(body['messages'][-1]['content'])
+        assert 'error' not in result
+        return httpx.Response(200, text=sse(chunk('已完成', finish='stop'), '[DONE]'))
+    upstream(monkeypatch, respond)
+    for i in range(2):
+        current = sandbox.get('/api/conversations/shared_naming').json()
+        response = sandbox.post('/api/chat/stream', json={'conversationId': 'shared_naming',
+            'sessionId': 'naming', 'revision': current['revision'], 'turnId': f'name_{i}',
+            'message': '给对话起名字' if i == 0 else '写另一篇文章'})
+        assert 'event: error' not in response.text
+        saved = sandbox.get('/api/conversations/shared_naming').json()
+        assert saved['title'] == '指定的名称' and saved['titleLocked'] is True
+        mode = 'artifact'
+    assert saved['messages'][-1]['artifactTitle'] == '另一篇文章'
+    assert len(calls) == 4

@@ -1,3 +1,4 @@
+import RenameDialog from './components/RenameDialog';
 import type { ThinkingLevel } from './lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
@@ -765,16 +766,28 @@ export default function App() {
     try { sessionStorage.removeItem(`easel_pending_turn:${sessionId}`); } catch { /* ignore */ }
   }, [appendAssistant, clearStream, refreshShared, reportHistoryError]);
 
-  const handleSessionRename = useCallback((id: string, title: string) => {
-    const t = title.trim();
-    if (!t) return;
-    if (sessionsRef.current.find((s) => s.id === id)?.source === 'server') { void updateShared(id, { title: t }); return; }
-    setSessions((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, title: t } : s));
-      saveSessions(next);
-      return next;
-    });
-  }, [updateShared]);
+  const [renameTarget, setRenameTarget] = useState<{
+    session: ChatSession; messageIndex?: number; artifactTitle?: string;
+  } | null>(null);
+  const handleSessionRename = (id: string, messageIndex?: number, artifactTitle?: string) => {
+    const session = sessionsRef.current.find(s => s.id === id);
+    if (session) setRenameTarget({ session, messageIndex, artifactTitle });
+  };
+  const saveSessionName = async (title: string) => {
+    if (!renameTarget) return;
+    const current = renameTarget.session;
+    if (current.source === 'server') {
+      // Save against the version seen when the dialog opened; don't overwrite
+      // a newer name from another tab while a suggestion was being generated.
+      const saved = await patchSharedSession(current, { title });
+      setSessions(prev => prev.map(s => s.id === current.id ? mergeSessionSummary(s, saved) : s));
+    } else {
+      setSessions(prev => {
+        const next = prev.map(s => s.id === current.id ? { ...s, title, titleLocked: true } : s);
+        saveSessions(next); return next;
+      });
+    }
+  };
 
   const handleSessionArchive = useCallback((id: string, archived: boolean) => {
     if (sessionsRef.current.find((s) => s.id === id)?.source === 'server') { void updateShared(id, { archived }); return; }
@@ -941,6 +954,7 @@ export default function App() {
               && !activeSession.optimistic && !activeSession.pendingTurnId
               && historyEnd(activeSession) >= (activeSession.messageCount || 0) ? undefined : streams[activeSession.id]}
             onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
+            onRename={(index, title) => handleSessionRename(activeSession.id, index, title)}
             onStop={() => handleStopStream(activeSession.id)}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -1058,6 +1072,8 @@ export default function App() {
         </div>
       </ResponsiveShell>
 
+      {renameTarget && <RenameDialog key={`${renameTarget.session.id}-${renameTarget.messageIndex ?? 'all'}`}
+        {...renameTarget} onSave={saveSessionName} onClose={() => setRenameTarget(null)} />}
       {showImportLocal && <div className="overlay">
         <div className="modal" role="dialog" aria-modal="true" aria-labelledby="import-history-title" style={{ width: 420, maxWidth: '100%' }}>
           <h2 id="import-history-title">迁移本浏览器旧对话</h2>
