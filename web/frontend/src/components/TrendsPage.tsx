@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import TrendLink from './TrendLink';
 import { fetchTrends, createIdea } from '../lib/api';
 import type { TrendGroup } from '../lib/api';
 import { IconFire, IconRefresh, IconBookmark, IconCheck } from './icons';
@@ -94,8 +95,7 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
                 <div key={i} className="trend-item">
                   <span className={`trend-rank ${i < 3 ? 'top' : ''}`}>{i + 1}</span>
                   <div className="trend-main">
-                    <a className="trend-title" href={it.url || undefined} target="_blank" rel="noreferrer"
-                      title={it.title}>{it.title}</a>
+                    <TrendLink className="trend-title" url={it.url} title={it.title} />
                     {it.hot && <span className="trend-hot">{it.hot}</span>}
                   </div>
                   <button className="trend-save" title={saved.has(it.title) ? '已收藏到选题库' : '收藏到选题库'}

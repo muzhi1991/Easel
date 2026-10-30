@@ -9,6 +9,8 @@ def check(browser, base, mobile):
     context = browser.new_context(viewport={'width': 390 if mobile else 1440, 'height': 900},
                                   is_mobile=mobile, has_touch=mobile, service_workers='block')
     context.add_init_script("localStorage.setItem('easel_onboarding_seen', '1')")
+    if mobile:
+        context.add_init_script("Object.defineProperty(navigator, 'standalone', {value: true})")
     page = context.new_page()
     page.set_default_timeout(10000)
     errors, sent, saved, calls = [], [], [], []
@@ -67,11 +69,28 @@ def check(browser, base, mobile):
         route.fulfill(content_type='application/json', body=json.dumps(data))
 
     context.route('**/api/**', api)
+    context.route('https://www.ithome.com/**', lambda route: route.fulfill(content_type='text/html; charset=utf-8', body='<h1>测试原文</h1><script>try { top.location.href="https://www.ithome.com/escape"; } catch {}</script>'))
     page.goto(base, wait_until='domcontentloaded')
     page.get_by_role('button', name='热点雷达 →', exact=True).click()
     page.get_by_role('button', name='IT之家', exact=True).click()
     card = page.get_by_role('region', name='IT之家热点', exact=True)
     card.get_by_text(article['title'], exact=True).wait_for()
+    card.get_by_text(article['title'], exact=True).click()
+    detail = page.get_by_role('dialog', name='热点详情')
+    detail.wait_for(timeout=2000)
+    assert detail.get_by_role('button', name='返回热点').is_visible()
+    page.frame_locator('iframe[title="热点原文"]').locator('h1').wait_for()
+    bounds = detail.get_by_role('button', name='返回热点').bounding_box()
+    assert bounds and bounds['y'] >= 0 and bounds['y'] + bounds['height'] <= 900
+    assert len(context.pages) == 1
+    assert page.url.rstrip('/') == base.rstrip('/')
+    detail.get_by_role('button', name='返回热点').click()
+    assert not detail.is_visible()
+    assert card.is_visible()
+    card.get_by_text(article['title'], exact=True).click()
+    detail.wait_for()
+    page.keyboard.press('Escape')
+    assert not detail.is_visible()
     assert '/api/overseas-trends' not in calls
     assert card.get_by_text('综合分 11.88', exact=True).is_visible()
     card.get_by_text('查看摘要', exact=True).click()
@@ -97,6 +116,8 @@ def check(browser, base, mobile):
     assert page.locator('.trends-page').count() == 0
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=f'/tmp/easel-ithome-chat-{"mobile" if mobile else "desktop"}.png', full_page=True)
+    # WebKit reports the deliberately blocked frame escape as a page error.
+    errors = [error for error in errors if "'allow-top-navigation' flag is not set" not in error]
     assert not errors, errors
     context.close()
 
@@ -104,9 +125,10 @@ def check(browser, base, mobile):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', default='http://127.0.0.1:5189')
+    parser.add_argument('--browser', choices=['chromium', 'webkit'], default='chromium')
     args = parser.parse_args()
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = getattr(p, args.browser).launch()
         for mobile in [False, True]:
             check(browser, args.url, mobile)
         browser.close()

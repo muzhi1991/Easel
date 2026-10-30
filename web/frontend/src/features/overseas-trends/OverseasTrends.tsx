@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import TrendLink from '../../components/TrendLink';
 import DOMPurify from 'dompurify';
 import { createIdea } from '../../lib/api';
 import { IconBookmark, IconCheck } from '../../components/icons';
@@ -50,7 +51,7 @@ function OverseasRow({ item, saved, onSaved, onUseTopic }: {
   });
   const summary = summaryText(item.summary);
   return <li className="overseas-item">
-    <a className="overseas-title" href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+    <TrendLink className="overseas-title" url={item.url} title={item.title} summary={summary} />
     <div className="overseas-meta">{[item.publisher, item.author].filter(Boolean).join(' · ')}
       {item.published_at !== null && <time dateTime={new Date(item.published_at * 1000).toISOString()}> · {dateLabel(item.published_at)}</time>}
     </div>

@@ -18,3 +18,20 @@
 .file-preview-content audio { width: 100%; }
 .file-preview-content iframe { width: 100%; height: 100%; border: 0; }
 .file-preview .download-control { flex: 0 0 auto; }
+
+.trend-detail { box-sizing: border-box; width: min(1000px, 100%); max-width: 100%;
+  height: var(--app-height, 100dvh); max-height: var(--app-height, 100dvh); margin: auto;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.trend-detail[open] { display: flex; flex-direction: column; gap: 12px; }
+.trend-detail::backdrop { background: #0008; }
+.trend-detail header { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.trend-detail header strong { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.trend-detail button { flex-shrink: 0; min-height: 44px; }
+.trend-detail details { flex-shrink: 0; max-height: 25%; overflow: auto; }
+.trend-detail iframe { flex: 1; min-height: 0; width: 100%; border: 0; background: white; }
+.trend-detail footer { flex-shrink: 0; font-size: 12px; }
+.trend-detail footer p { margin: 0 0 8px; }
+.trend-detail footer div { display: flex; gap: 8px; }
+.trend-detail input { flex: 1; min-width: 0; }
