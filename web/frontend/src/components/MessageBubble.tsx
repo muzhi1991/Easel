@@ -9,6 +9,7 @@ import MessageAttachments from './MessageAttachments';
 
 export interface BubbleActions {
   onCopy: () => void;
+  onRename?: () => void;
   onRetry?: () => void;    // 仅最后一轮可用（append-only：不改写历史）
   canModify: boolean;      // 流式中禁用 retry
 }
@@ -34,6 +35,7 @@ function ActionBar({ actions }: { actions: BubbleActions }) {
       <button className="msg-action" onClick={copy} title="复制">
         {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}<span>{copied ? '已复制' : '复制'}</span>
       </button>
+      {actions.onRename && <button className="msg-action" onClick={actions.onRename} title="命名对话"><span>命名对话</span></button>}
       {actions.onRetry && actions.canModify && (
         <button className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}

@@ -69,7 +69,9 @@ def check(browser, url):
     assert result['ok'], f'rename field clipped by keyboard/layout: {result}'
     page.locator('.session-rename-input').press('Escape')
     page.evaluate('setViewport({height: 844})')
-    page.get_by_role('button', name='打开导航').click()
+    # Escape closes the naming dialog; navigation remains available beneath it.
+    if page.get_by_role('button', name='打开导航').get_attribute('aria-expanded') != 'true':
+        page.get_by_role('button', name='打开导航').click()
     page.locator('.session-item-title').first.click()
     field = page.locator('.chat-input')
     field.fill('Unsent voice-input draft')

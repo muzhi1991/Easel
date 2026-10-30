@@ -65,3 +65,8 @@ export async function importLocalSessions(): Promise<number> {
   localStorage.setItem(MIGRATED_KEY, JSON.stringify([...migrated]));
   return local.length;
 }
+
+export const suggestSessionTitle = (session: ChatSession, messageIndex?: number) =>
+  request<{ title: string }>(`/${encodeURIComponent(session.id)}/suggest-title`, 'POST', {
+    messageIndex, historyEpoch: session.historyEpoch || 0,
+  });
