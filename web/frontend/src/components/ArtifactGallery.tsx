@@ -12,7 +12,9 @@ function HtmlArtifact({ artifact }: { artifact: Artifact }) {
   const [error, setError] = useState(false);
   const [bounds, setBounds] = useState({ width: 800, height: 600 });
   const [available, setAvailable] = useState({ width: 640, height: 480 });
-  const token = useRef(crypto.randomUUID());
+  // getRandomValues also works on plain HTTP LAN origins, unlike randomUUID.
+  const [token] = useState(() => Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    byte => byte.toString(16).padStart(2, '0')).join(''));
   useEffect(() => {
     const controller = new AbortController();
     void fetch(artifact.url, { signal: controller.signal }).then(async response => {
@@ -26,7 +28,7 @@ function HtmlArtifact({ artifact }: { artifact: Artifact }) {
       document.head.prepend(baseElement);
       const script = document.createElement('script');
       script.textContent = `(() => {
-        const report = () => parent.postMessage({type:'easel-artifact-size',token:${JSON.stringify(token.current)},
+        const report = () => parent.postMessage({type:'easel-artifact-size',token:${JSON.stringify(token)},
           width:Math.max(document.documentElement.scrollWidth,document.body.scrollWidth),
           height:Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)}, '*');
         addEventListener('load', report);
@@ -40,7 +42,7 @@ function HtmlArtifact({ artifact }: { artifact: Artifact }) {
       if (!controller.signal.aborted) setError(true);
     });
     return () => controller.abort();
-  }, [artifact.url]);
+  }, [artifact.url, token]);
   useEffect(() => {
     const observer = new ResizeObserver(entries => {
       const rect = entries[0].contentRect;
@@ -50,14 +52,14 @@ function HtmlArtifact({ artifact }: { artifact: Artifact }) {
     const resize = (event: MessageEvent) => {
       const data = event.data;
       if (event.source !== frame.current?.contentWindow || data?.type !== 'easel-artifact-size'
-          || data.token !== token.current || !Number.isFinite(data.width) || !Number.isFinite(data.height)
+          || data.token !== token || !Number.isFinite(data.width) || !Number.isFinite(data.height)
           || data.width <= 0 || data.height <= 0 || data.width > 20000 || data.height > 50000) return;
       setBounds(previous => previous.width === data.width && previous.height === data.height
         ? previous : { width: data.width, height: data.height });
     };
     window.addEventListener('message', resize);
     return () => { observer.disconnect(); window.removeEventListener('message', resize); };
-  }, []);
+  }, [token]);
   const fitted = fitArtifact(bounds.width, bounds.height, available.width - 24, available.height - 24);
   return (
     <div className="artifact-html-stage" ref={stage}>
