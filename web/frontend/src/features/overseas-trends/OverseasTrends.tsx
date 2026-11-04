@@ -51,7 +51,7 @@ function OverseasRow({ item, saved, onSaved, onUseTopic }: {
   });
   const summary = summaryText(item.summary);
   return <li className="overseas-item">
-    <TrendLink className="overseas-title" url={item.url} title={item.title} summary={summary} />
+    <TrendLink className="overseas-title" url={item.url} title={item.title} />
     <div className="overseas-meta">{[item.publisher, item.author].filter(Boolean).join(' · ')}
       {item.published_at !== null && <time dateTime={new Date(item.published_at * 1000).toISOString()}> · {dateLabel(item.published_at)}</time>}
     </div>

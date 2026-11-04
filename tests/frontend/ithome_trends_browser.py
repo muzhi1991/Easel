@@ -69,28 +69,26 @@ def check(browser, base, mobile):
         route.fulfill(content_type='application/json', body=json.dumps(data))
 
     context.route('**/api/**', api)
-    context.route('https://www.ithome.com/**', lambda route: route.fulfill(content_type='text/html; charset=utf-8', body='<h1>测试原文</h1><script>try { top.location.href="https://www.ithome.com/escape"; } catch {}</script>'))
+    context.route('https://www.ithome.com/**', lambda route: route.fulfill(content_type='text/html; charset=utf-8', headers={'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'"}, body='<!doctype html><meta charset="utf-8"><h1>测试原文</h1>'))
     page.goto(base, wait_until='domcontentloaded')
     page.get_by_role('button', name='热点雷达 →', exact=True).click()
     page.get_by_role('button', name='IT之家', exact=True).click()
     card = page.get_by_role('region', name='IT之家热点', exact=True)
     card.get_by_text(article['title'], exact=True).wait_for()
-    card.get_by_text(article['title'], exact=True).click()
-    detail = page.get_by_role('dialog', name='热点详情')
-    detail.wait_for(timeout=2000)
-    assert detail.get_by_role('button', name='返回热点').is_visible()
-    page.frame_locator('iframe[title="热点原文"]').locator('h1').wait_for()
-    bounds = detail.get_by_role('button', name='返回热点').bounding_box()
-    assert bounds and bounds['y'] >= 0 and bounds['y'] + bounds['height'] <= 900
-    assert len(context.pages) == 1
+    # Real news sites may forbid framing. The article must still be readable,
+    # and closing its tab must leave the original radar and selection intact.
+    with page.expect_popup() as opened:
+        card.get_by_text(article['title'], exact=True).click()
+    original = opened.value
+    original.get_by_role('heading', name='测试原文').wait_for()
+    assert original.url == article['url']
+    assert original.evaluate('window.opener === null')
+    assert page.locator('iframe[title="热点原文"]').count() == 0
     assert page.url.rstrip('/') == base.rstrip('/')
-    detail.get_by_role('button', name='返回热点').click()
-    assert not detail.is_visible()
     assert card.is_visible()
-    card.get_by_text(article['title'], exact=True).click()
-    detail.wait_for()
-    page.keyboard.press('Escape')
-    assert not detail.is_visible()
+    original.close()
+    assert len(context.pages) == 1
+    assert card.is_visible()
     assert '/api/overseas-trends' not in calls
     assert card.get_by_text('综合分 11.88', exact=True).is_visible()
     card.get_by_text('查看摘要', exact=True).click()
@@ -116,8 +114,6 @@ def check(browser, base, mobile):
     assert page.locator('.trends-page').count() == 0
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=f'/tmp/easel-ithome-chat-{"mobile" if mobile else "desktop"}.png', full_page=True)
-    # WebKit reports the deliberately blocked frame escape as a page error.
-    errors = [error for error in errors if "'allow-top-navigation' flag is not set" not in error]
     assert not errors, errors
     context.close()
 
