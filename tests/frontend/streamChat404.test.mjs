@@ -7,7 +7,14 @@ import { test } from 'node:test';
 const require = createRequire(new URL('../../web/frontend/package.json', import.meta.url));
 const ts = require('typescript');
 const source = readFileSync(new URL('../../web/frontend/src/lib/api.ts', import.meta.url), 'utf8');
-const { outputText } = ts.transpileModule(source, {
+const parsed = ts.createSourceFile('api.ts', source, ts.ScriptTarget.Latest, true);
+const declaration = parsed.statements.find(node =>
+  ts.isFunctionDeclaration(node) && node.name?.text === 'streamChat');
+assert.ok(declaration);
+// Like the replay tests, exercise the stream without evaluating unrelated API imports.
+const sessionIdDeclaration = parsed.statements.find(node => ts.isVariableStatement(node)
+  && node.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === 'agentSessionId'));
+const { outputText } = ts.transpileModule(sessionIdDeclaration.getText(parsed) + '\n' + declaration.getText(parsed), {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
     target: ts.ScriptTarget.ES2022,
@@ -25,7 +32,7 @@ function loadApi(fetchImpl) {
   const module = { exports: {} };
   const sandbox = {
     exports: module.exports,
-    require: (name) => require(name),
+    BASE: '',
     console,
     window: { location: { pathname: '/' }, addEventListener() {}, removeEventListener() {} },
     AbortController,

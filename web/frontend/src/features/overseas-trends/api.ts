@@ -13,7 +13,7 @@ export interface OverseasItem {
   heat_score: number | null; metrics: Record<string, number>;
 }
 export interface OverseasData {
-  configured: boolean; error: string; stale: boolean;
+  configured: boolean; error: string; error_code?: string; stale: boolean;
   fetched_at: number | null; feed_updated_at: number | null;
   groups: { source: OverseasSource; label: string; items: OverseasItem[] }[];
 }

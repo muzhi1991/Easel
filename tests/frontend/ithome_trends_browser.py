@@ -17,9 +17,10 @@ def check(browser, base, mobile):
     page.on('pageerror', lambda error: errors.append(str(error)))
     state = {'fail': False}
     sessions = {}
+    summary = '芯片性能提升 & 功耗下降' + '科技背景。' * 250 + '摘要末尾必须保留'
     article = {'id': 'ithome-test', 'source': 'ithome', 'title': 'IT之家测试科技新闻',
                'url': 'https://www.ithome.com/0/123/456.htm', 'publisher': 'IT之家·24h热榜',
-               'author': '', 'summary': '<p>芯片性能提升 &amp; 功耗下降</p><script>alert(1)</script>',
+               'author': '', 'summary': '<p>' + summary.replace('&', '&amp;') + '</p><script>alert(1)</script>',
                'published_at': 1792400400, 'heat_score': 11.88, 'metrics': {}}
 
     def api(route):
@@ -41,8 +42,10 @@ def check(browser, base, mobile):
             data = sessions[path.rsplit('/', 1)[-1]]
         elif path in [ '/api/personas', '/api/accounts', '/api/outputs']:
             data = []
+        elif path == '/api/trends/sources':
+            data = {'version': 1, 'sources': [], 'warnings': []}
         elif path == '/api/trends':
-            data = {'trends': [], 'updated': 1792400400}
+            data = {'version': 1, 'trends': [], 'updated': 1792400400, 'warnings': []}
         elif path == '/api/ithome-trends':
             if state['fail']:
                 route.fulfill(status=503, body='unavailable')
@@ -92,7 +95,7 @@ def check(browser, base, mobile):
     assert '/api/overseas-trends' not in calls
     assert card.get_by_text('综合分 11.88', exact=True).is_visible()
     card.get_by_text('查看摘要', exact=True).click()
-    assert card.get_by_text('芯片性能提升 & 功耗下降', exact=True).is_visible()
+    assert card.get_by_text(summary, exact=True).is_visible()
     card.get_by_role('button', name='收藏到选题库').click()
     card.get_by_role('button', name='已收藏').wait_for()
     assert saved[0]['source'] == article['publisher'] and article['url'] in saved[0]['note']
@@ -105,7 +108,7 @@ def check(browser, base, mobile):
     assert len(sent) == 1
     prompt = sent[0]['message']
     for expected in [article['title'], article['publisher'], article['url'], '发布时间：',
-                     '芯片性能提升 & 功耗下降', '二创角度', '文案初稿']:
+                     '芯片性能提升 & 功耗下降', '摘要末尾必须保留', '二创角度', '文案初稿']:
         assert expected in prompt, (expected, prompt)
     assert '<script>' not in prompt and 'alert(1)' not in prompt and '<p>' not in prompt
     assert sent[0]['sessionId']

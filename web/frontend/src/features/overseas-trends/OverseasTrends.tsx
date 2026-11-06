@@ -29,7 +29,7 @@ function context(item: OverseasItem) {
 }
 
 function OverseasRow({ item, saved, onSaved, onUseTopic }: {
-  item: OverseasItem; saved: boolean; onSaved: (id: string) => void; onUseTopic: (text: string) => void;
+  item: OverseasItem; saved: boolean; onSaved: (id: string) => void; onUseTopic: (title: string, context?: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -64,13 +64,13 @@ function OverseasRow({ item, saved, onSaved, onUseTopic }: {
       <button className="btn btn-sm" onClick={() => void save()} disabled={saving || saved} aria-label={saved ? '已收藏' : '收藏到选题库'}>
         {saved ? <IconCheck size={14} /> : <IconBookmark size={14} />}{saved ? '已收藏' : saving ? '收藏中…' : '收藏'}
       </button>
-      <button className="btn btn-sm" onClick={() => onUseTopic(context(item))}>做内容</button>
+      <button className="btn btn-sm" onClick={() => onUseTopic(item.title, context(item))}>做内容</button>
     </div>
     {error && <p className="overseas-error" role="alert">{error}</p>}
   </li>;
 }
 
-export function OverseasCards({ feed, onUseTopic }: { feed: OverseasState; onUseTopic: (text: string) => void }) {
+export function OverseasCards({ feed, onUseTopic }: { feed: OverseasState; onUseTopic: (title: string, context?: string) => void }) {
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const markSaved = (id: string) => setSaved((previous) => new Set(previous).add(id));
   return <>{feed.config.sources.filter(({ key }) => feed.selected.includes(key)).map(({ key, label }) => {
