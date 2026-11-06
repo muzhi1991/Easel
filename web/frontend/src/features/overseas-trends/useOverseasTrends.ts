@@ -24,6 +24,11 @@ export function useOverseasTrends(config: FeedConfig = overseasConfig) {
     });
     return () => controller.abort();
   }, [enabled, revision, config]);
+  useEffect(() => {
+    if (!enabled || loading || data?.error_code !== 'busy') return;
+    const timer = window.setTimeout(() => setRevision(value => value + 1), 1500);
+    return () => window.clearTimeout(timer);
+  }, [enabled, loading, data]);
   const toggle = (key: OverseasSource) => setSelected((previous) =>
     previous.includes(key) ? previous.filter((value) => value !== key) : [...previous, key]);
   const refresh = () => { if (enabled) setRevision((previous) => previous + 1); };

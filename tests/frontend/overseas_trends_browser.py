@@ -36,9 +36,13 @@ def check(browser, base, mobile):
         elif path.endswith('/api/ithome-trends'):
             data = {'configured': True, 'error': '', 'stale': False, 'fetched_at': None,
                     'feed_updated_at': None, 'groups': [{'source': 'ithome', 'label': 'IT之家', 'items': []}]}
+        elif path.endswith('/api/trends/sources'):
+            data = {'version': 1, 'warnings': [], 'sources': [
+                {'id': key, 'label': label, 'type': 'python', 'default': key in ('weibo', 'douyin', 'zhihu'), 'refresh_seconds': 300}
+                for key, label in [('weibo', '微博'), ('douyin', '抖音'), ('zhihu', '知乎'), ('bilibili', 'B站'), ('baidu', '百度'), ('toutiao', '头条')]]}
         elif path.endswith('/api/trends'):
-            data = {'trends': [{'platform': 'weibo', 'label': '微博', 'ok': True,
-                                'items': [{'title': '国内测试热搜', 'url': 'https://example.com', 'hot': '100万'}]}], 'updated': 1792400400}
+            data = {'version': 1, 'trends': [{'platform': 'weibo', 'label': '微博', 'ok': True,
+                                'items': [{'id': 'domestic', 'title': '国内测试热搜', 'url': 'https://example.com', 'hot': '100万'}]}], 'updated': 1792400400, 'warnings': []}
         elif path.endswith('/api/ideas'):
             saved.append(route.request.post_data_json)
             data = {'id': 'saved', **saved[-1]}
@@ -112,7 +116,7 @@ if __name__ == '__main__':
         raise RuntimeError('Smoke fixture already exists; refusing to overwrite it')
     try:
         html.write_text('<meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module" src="/src/__overseas_smoke__.tsx"></script>')
-        entry.write_text("import { createRoot } from 'react-dom/client'; import './index.css'; import TrendsPage from './components/TrendsPage'; createRoot(document.getElementById('root')!).render(<TrendsPage onUseTopic={(text) => { (window as any).__overseasTopic = text; }} />);")
+        entry.write_text("import { createRoot } from 'react-dom/client'; import './index.css'; import TrendsPage from './components/TrendsPage'; createRoot(document.getElementById('root')!).render(<TrendsPage onUseTopic={(title, context) => { (window as any).__overseasTopic = context ?? title; }} />);")
         with sync_playwright() as p:
             browser = p.chromium.launch()
             for mobile in [False, True]:

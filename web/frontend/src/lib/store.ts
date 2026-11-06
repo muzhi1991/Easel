@@ -129,16 +129,23 @@ export function loadSessions(): ChatSession[] {
   }
 }
 
-/** Only old local records are written here. Shared messages are owned by the server. */
-export function saveSessions(sessions: ChatSession[]): void {
-  const migrated = new Set<string>(JSON.parse(localStorage.getItem(MIGRATED_KEY) || '[]'));
-  const original = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as ChatSession[];
-  // Keep imported originals as a local backup; deletion on the server must not revive them.
-  const retained = original.filter((s) => migrated.has(s.id));
-  const next = JSON.stringify([
-    ...retained, ...sessions.filter((s) => s.source !== 'server' && !migrated.has(s.id)),
-  ]);
-  if (next !== localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, next);
+/** Shared messages stay on the server; retain local migration backups. */
+export function saveSessions(sessions: ChatSession[]): boolean {
+  try {
+    const migrated = new Set<string>(JSON.parse(localStorage.getItem(MIGRATED_KEY) || '[]'));
+    const original = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as ChatSession[];
+    // Keep imported originals as a local backup; deletion on the server must not revive them.
+    const retained = original.filter((s) => migrated.has(s.id));
+    const next = JSON.stringify([
+      ...retained, ...sessions.filter((s) => s.source !== 'server' && !migrated.has(s.id)),
+    ]);
+    if (next !== localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, next);
+    return true;
+  } catch {
+    // Keep the live conversation in memory; never throw from a React state updater.
+    if (typeof window !== 'undefined') queueMicrotask(() => window.dispatchEvent(new Event('easel-session-save-error')));
+    return false;
+  }
 }
 
 export function createSession(persona?: string): ChatSession {

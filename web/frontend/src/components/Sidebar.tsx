@@ -1,3 +1,4 @@
+import SettingsSelect from './SettingsSelect';
 import { useState } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
@@ -98,22 +99,16 @@ export default function Sidebar({
           <h1>Easel</h1>
           <ThemeToggle />
         </div>
-        <select
-          className="persona-select"
-          value={selectedPersona}
-          onChange={(e) => {
-            if (e.target.value === '__new__') { onNewProfile(); return; }
-            onPersonaChange(e.target.value);
-          }}
-          aria-label="用户画像"
+        <SettingsSelect className="persona-control" label="选择用户画像"
           title={currentPage === 'chat' ? '选择画像；已有消息时切换会新建对话' : '选择当前任务使用的画像，不影响历史对话'}
-        >
-          <option value="">通用模式</option>
-          {personas.map((p) => (
-            <option key={p.name} value={p.name}>{p.name}</option>
-          ))}
-          <option value="__new__">+ 新建画像…</option>
-        </select>
+          value={selectedPersona}
+          options={[{ value: '', label: '通用模式' },
+            ...personas.map(p => ({ value: p.name, label: p.name })),
+            { value: '__new__', label: '+ 新建画像…' }]}
+          onChange={(value) => {
+            if (value === '__new__') { onNewProfile(); return; }
+            onPersonaChange(value);
+          }} />
       </div>
 
       <nav className="sidebar-nav">

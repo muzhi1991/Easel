@@ -11,14 +11,19 @@ RSS 2.0 `channel/item` 中，`title`、HTTP(S) `link`、`source` 是必需字段
 
 `heat/heat_score` 为生成端综合分，按原值显示两位小数，不假设百分制。`heat` 中可保留 `impressions`、`likes`、`reposts`、`replies`、`quotes`、`reddit_rank`、`source_weight`；界面辅助展示浏览、赞和转发。排名范围和权重不明确，不在界面宣称为平台官方排名。缺失或非法数值隐藏，真实 0 保留；新增未知字段忽略。
 
-## 独立实现与同步上游
+## 接入官方数据源架构
 
-- 后端：[RSS 模块](../easel/overseas_trends.py)，独立 GET `/api/overseas-trends`，应用只注册路由。
-- 前端：[海外组件](../web/frontend/src/features/overseas-trends/OverseasTrends.tsx)，请求、类型和样式均在同目录。原页面仅导入 hook、插入按钮/卡片、接入刷新。
-- 原有 `TREND_SOURCES`、JSON 解析、`/api/trends`、国内缓存、默认选择和首页逻辑不变。
-- 同步上游时重点核查 `web/app.py` 的路由注册和 `TrendsPage.tsx` 的接线；不要把 RSS 逻辑合进国内渠道处理函数。
+2026-11-06 起使用官方 `easel.trends` 注册表、RSS/Atom 解析器、隔离采集进程和 `TrendService` 缓存，不再维护独立的下载器或缓存。
 
-同一份订阅共享 5 分钟内存缓存及 ETag。请求失败后 1 分钟内不反复重试；有上次成功数据时保留并标记，订阅 URL 改变时清空旧缓存。刷新按钮遵循缓存，不会绕过限频。最多读取 2 MiB XML。缓存随进程重启清空，订阅无内容与获取失败分别展示。
+- 现有 `.env` 的 `EASEL_OVERSEAS_RSS_URL` / `EASEL_ITHOME_RSS_URL` 自动注册为 `overseas-rss` / `ithome-rss`，无需复制或迁移个人 URL。仍以进程环境优先，留空停用。
+- 在官方「数据源」管理中可查看和停用/恢复这两份订阅；由 `.env` 提供的预设不能删除。可信本地 `config/trend-sources.json` 可以按相同 ID 覆盖刷新间隔等选项，`enabled: false` 优先于环境配置；不改写 `.env`。
+- 两份订阅也可通过统一 `/api/trends` 查询。兼容接口 `/api/overseas-trends`、`/api/ithome-trends` 只进行分组和字段映射，与统一接口共享同一个服务和缓存。
+- 前端保留 X、Reddit、海外资讯和 IT之家独立按钮及丰富卡片；普通自定义 RSS/Atom、HTTP、Python 源使用官方卡片。原有频道选择存储键继续有效，包括全部取消的选择。
+- RSS 解析器以 v1 协议的可选 `rss` 元数据保留来源、作者、摘要、综合分及各项指标；普通采集器无需提供这些字段。`feed_updated_at` 保留订阅更新时间。未知字段忽略，摘要仍按纯文本呈现。
+
+采集沿用官方约束：默认 5 分钟缓存，失败最多 30 秒后允许重试，最长保留上次成功数据 24 小时；可通过可信本地配置调整。网络请求在隔离进程中执行，XML 上限 2 MiB、单份订阅上限 500 条，分组视图在该上限内不提前按首页条数截断。ETag 和 304 保留；只有解析成功才更新缓存和校验标记。URL 或环境变化会使用新的缓存键，错误不返回订阅地址或凭证。刷新遵循服务缓存，不绕过限频。
+
+实现入口：[展示适配模块](../easel/overseas_trends.py)、[官方数据源配置](../easel/trends/sources.py)、[RSS 解析](../easel/trends/rss.py)、[采集服务](../easel/trends/service.py)和[前端卡片](../web/frontend/src/features/overseas-trends/OverseasTrends.tsx)。新增数据源优先走官方注册和协议，不再添加并行采集管线。
 
 收藏使用现有选题库接口，在备注中保留摘要和原文；做内容通过现有回调传入标题和来源上下文。新模块不修改原渠道收藏或对话行为。
 
@@ -39,7 +44,7 @@ python -m pytest tests/test_overseas_trends.py tests/test_trends.py
 映射为 `ithome`，不要求生成端修改。保留混合资讯/热榜的订阅顺序、publisher
 标记与综合分，不将列表宣称为官方排名。
 
-`/api/ithome-trends` 复用 RSS 解析和获取类，但使用独立实例，缓存、ETag、失败状态
+`/api/ithome-trends` 使用官方服务中独立的数据源缓存项，缓存、ETag、失败状态
 与海外源隔离。前端复用渠道按钮、卡片和请求 hook。收藏和「做内容」均携带标题、
 来源、发布时间、纯文本摘要与原文链接；「做内容」通过原有回调新建会话并发送创作请求。
 

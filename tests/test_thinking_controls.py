@@ -147,3 +147,19 @@ def test_http_turn_applies_level_before_request(choice, expected, fail, tmp_path
     else:
         assert calls[1] == ('post', 'agent:main:thinking-test')
         assert any(e['event'] == 'token' and 'ok' in e['data'] for e in events)
+
+
+def test_saved_default_then_process_then_dotenv_without_restart(tmp_path, monkeypatch):
+    cfg = tmp_path / 'openclaw.json'
+    monkeypatch.setattr(web, '_oc_config_path', lambda: cfg)
+    monkeypatch.setattr(web, '__file__', str(tmp_path / 'web/app.py'))
+    monkeypatch.delenv('EASEL_THINKING_LEVEL', raising=False)
+    env = tmp_path / '.env'
+    env.write_text('EASEL_THINKING_LEVEL=ultra\n')
+    assert web._thinking_default() == 'ultra'
+    env.write_text('EASEL_THINKING_LEVEL=off\n')
+    assert web._thinking_default() == 'off'
+    monkeypatch.setenv('EASEL_THINKING_LEVEL', 'low')
+    assert web._thinking_default() == 'low'
+    cfg.write_text(json.dumps({'agents': {'defaults': {'thinkingDefault': 'high'}}}))
+    assert web._thinking_default() == 'high'
