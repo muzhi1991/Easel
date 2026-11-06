@@ -1,3 +1,4 @@
+import TransferDialog from './components/TransferDialog';
 import RenameDialog from './components/RenameDialog';
 import type { ThinkingLevel } from './lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -32,13 +33,14 @@ import {
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
 import type { SharedTurn } from './lib/api';
-import { loadSharedSessions, getSharedSession, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
+import { transferSharedSession, loadSharedSessions, getSharedSession, ensureSharedSession, patchSharedSession, deleteSharedSession, importLocalSessions } from './lib/sharedSessions';
 
 import { readCachedSummaries, readCachedHistory } from './lib/historyCache';
 import PwaNotice from './components/PwaNotice';
 
 import { historyEnd, mergeSessionSummary, mergeMessagePage } from './lib/sessionHistory';
 
+const SELECTED_PERSONA_KEY = 'easel_tab_persona';
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
 
 function onboardingSeen(): boolean {
@@ -65,7 +67,7 @@ export default function App() {
     setPersonas(list);
     return list;
   }, []);
-  const [selectedPersona, setSelectedPersona] = useState('');
+  const [selectedPersona, setSelectedPersona] = useState(() => sessionStorage.getItem(SELECTED_PERSONA_KEY) || '');
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
@@ -153,12 +155,21 @@ export default function App() {
   useEffect(() => {
     if (!historyReady || activeSessionId) return;
     const last = sessionStorage.getItem(TAB_SESSION_KEY) || loadActiveId();
-    const target = sessions.find(s => s.id === last || s.id === `shared_${last}`);
-    const selected = target || createSession();
+    const remembered = sessionStorage.getItem(SELECTED_PERSONA_KEY);
+    const previous = sessions.find(s => s.id === last || s.id === `shared_${last}`);
+    const target = remembered === null || (previous?.persona || '') === remembered ? previous
+      : sessions.find(s => !s.archived && (s.persona || '') === remembered);
+    const selected = target || createSession(remembered || undefined);
     if (!target) setSessions(prev => [selected, ...prev]);
     setActiveSessionId(selected.id);
     setSelectedPersona(selected.persona || '');
   }, [historyReady, activeSessionId, sessions]);
+
+  useEffect(() => {
+    if (historyReady && activeSessionId) {
+      try { sessionStorage.setItem(SELECTED_PERSONA_KEY, selectedPersona); } catch { /* privacy mode */ }
+    }
+  }, [historyReady, activeSessionId, selectedPersona]);
 
   // 持久化当前活跃会话 id，重开网页据此续接上次对话（修复"今天再问就忘了"）。
   // 仅在非空时写：避免挂载首刷 activeSessionId 尚为 null 时误清掉已存的 id。
@@ -792,6 +803,16 @@ export default function App() {
   const [renameTarget, setRenameTarget] = useState<{
     session: ChatSession; messageIndex?: number; artifactTitle?: string;
   } | null>(null);
+  const [transferTarget, setTransferTarget] = useState<ChatSession | null>(null);
+  const transferSession = async (persona: string, copy: boolean) => {
+    if (!transferTarget) return;
+    if (transferTarget.source !== 'server') throw new Error('请先点击「迁移本浏览器旧对话」，再复制或移动');
+    const saved = await transferSharedSession(transferTarget, persona, copy);
+    setSessions(previous => [saved, ...previous.filter(s => copy || s.id !== transferTarget.id)]);
+    setSelectedPersona(persona);
+    setActiveSessionId(saved.id);
+    setCurrentPage('chat');
+  };
   const handleSessionRename = (id: string, messageIndex?: number, artifactTitle?: string) => {
     const session = sessionsRef.current.find(s => s.id === id);
     if (session) setRenameTarget({ session, messageIndex, artifactTitle });
@@ -947,7 +968,7 @@ export default function App() {
     switch (currentPage) {
       case 'dashboard':
         return (
-          <DashboardPage
+          <DashboardPage key={selectedPersona}
             persona={selectedPersona}
             gatewayStatus={gatewayStatus}
             apiDirect={apiDirect}
@@ -1010,7 +1031,7 @@ export default function App() {
       case 'calendar':
         return <CalendarPage />;
       case 'publish':
-        return <PublishPage persona={selectedPersona} />;
+        return <PublishPage key={selectedPersona} persona={selectedPersona} />;
       case 'breakdown':
         return <BreakdownPage persona={selectedPersona} />;
       case 'skills':
@@ -1018,7 +1039,7 @@ export default function App() {
       case 'outputs':
         return <OutputsPage jumpPath={outputsJump} onJumpHandled={clearOutputsJump} />;
       case 'accounts':
-        return <AccountsPage />;
+        return <AccountsPage key={selectedPersona} persona={selectedPersona} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onUsePersona={handlePersonaChange} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       default:
@@ -1057,7 +1078,13 @@ export default function App() {
         persona={selectedPersona || '通用模式'} onNewChat={handleNewChat}
         navigation={(close) => <Sidebar
         currentPage={currentPage}
-        onPageChange={(page) => { setCurrentPage(page); close(); }}
+        onPageChange={(page) => {
+          if (page === 'chat' && (activeSession?.persona || '') !== selectedPersona) {
+            const target = sessions.find(s => !s.archived && (s.persona || '') === selectedPersona);
+            if (target) setActiveSessionId(target.id); else { handleNewChat(); close(); return; }
+          }
+          setCurrentPage(page); close();
+        }}
         personas={personas}
         selectedPersona={selectedPersona}
         onPersonaChange={(persona) => { handlePersonaChange(persona); close(); }}
@@ -1069,6 +1096,7 @@ export default function App() {
         onSessionDelete={handleSessionDelete}
         onSessionRename={handleSessionRename}
         onSessionArchive={handleSessionArchive}
+        onTransfer={id => setTransferTarget(sessionsRef.current.find(s => s.id === id) || null)}
         onNewChat={() => { handleNewChat(); close(); }}
         gatewayStatus={gatewayStatus}
         apiDirect={apiDirect}
@@ -1096,6 +1124,8 @@ export default function App() {
         </div>
       </ResponsiveShell>
 
+      {transferTarget && <TransferDialog session={transferTarget} personas={personas}
+        onSave={transferSession} onClose={() => setTransferTarget(null)} />}
       {renameTarget && <RenameDialog key={`${renameTarget.session.id}-${renameTarget.messageIndex ?? 'all'}`}
         {...renameTarget} onSave={saveSessionName} onClose={() => setRenameTarget(null)} />}
       {showImportLocal && <div className="overlay">

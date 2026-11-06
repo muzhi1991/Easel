@@ -10,7 +10,7 @@ const source = readFileSync(new URL('../../web/frontend/src/lib/api.ts', import.
 const parsed = ts.createSourceFile('api.ts', source, ts.ScriptTarget.Latest, true);
 const start = parsed.statements.find(node =>
   ts.isFunctionDeclaration(node) && node.name?.text === 'startLogin');
-const { outputText } = ts.transpileModule(start.getText(parsed), {
+const { outputText } = ts.transpileModule(parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'accountUrl').getText(parsed) + '\n' + start.getText(parsed), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 });
 

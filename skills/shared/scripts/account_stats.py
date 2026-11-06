@@ -18,9 +18,12 @@ import re
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
 from urllib.parse import urlparse
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
 ANALYTICS_DIR = PROJECT_ROOT / "outputs" / "_analytics"
 # 分层保留：近 KEEP_FULL_DAYS 天全部变化一条不丢；90~DAILY_DAYS 天每天≤1条；更老每周≤1条。
 # 既留住 日/周/月/年 对比所需的老基线，又让总量恒定在几百条(几十KB)、用多年不膨胀。
@@ -281,7 +284,7 @@ def growth_windows(history: list[dict], current: dict) -> dict:
 
 
 def _history_path(platform: str) -> Path:
-    return ANALYTICS_DIR / f"{platform}.jsonl"
+    return account_scope.directory(ANALYTICS_DIR) / f"{platform}.jsonl"
 
 
 def load_history(platform: str) -> list[dict]:
@@ -300,7 +303,7 @@ def load_history(platform: str) -> list[dict]:
 
 
 def append_snapshot(platform: str, snap: dict) -> None:
-    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    account_scope.directory(ANALYTICS_DIR).mkdir(parents=True, exist_ok=True)
     with _history_path(platform).open("a", encoding="utf-8") as f:
         f.write(json.dumps(snap, ensure_ascii=False) + "\n")
 
@@ -350,7 +353,7 @@ def record_snapshot(platform: str, snap: dict) -> None:
         return
     h.append(snap)
     h = compact(h, snap["ts"])
-    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    account_scope.directory(ANALYTICS_DIR).mkdir(parents=True, exist_ok=True)
     body = "\n".join(json.dumps(x, ensure_ascii=False) for x in h)
     _history_path(platform).write_text(body + ("\n" if body else ""), encoding="utf-8")
 
@@ -359,7 +362,7 @@ def record_snapshot(platform: str, snap: dict) -> None:
 # 浏览器
 # --------------------------------------------------------------------------- #
 def _profile_dir(platform: str, base: str | None) -> Path:
-    root = Path(base).expanduser() if base else Path.home() / ".easel-browser-profiles"
+    root = account_scope.browser_base(base)
     return root / PLATFORMS[platform]["profile"]
 
 
@@ -708,7 +711,7 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                     except Exception:
                         pass
                 if os.environ.get("EASEL_STATS_DEBUG"):
-                    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+                    account_scope.directory(ANALYTICS_DIR).mkdir(parents=True, exist_ok=True)
                     (ANALYTICS_DIR / f"{platform}-page.txt").write_text("\n".join(lines)[:20000], encoding="utf-8")
                     try:
                         page.screenshot(path=str(ANALYTICS_DIR / f"{platform}-page.png"))

@@ -26,6 +26,9 @@ import signal
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -74,8 +77,8 @@ SELECTORS = {
     "toast": 'span[class*="semi-toast-content-text"]',
 }
 PROFILE_NAME = "DouyinProfile"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "douyin.png"
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+DEFAULT_QR_OUT = account_scope.directory(PROJECT_ROOT / "outputs" / "_login") / "douyin.png"
 
 # 短信验证墙的多步流程选择器（跨引擎，逐个 query_selector 尝试；真机首次跑后据 dump 校准）。
 # 扫码后先出「验证方式选择屏」→ 选「接收短信验证码」进发码屏 → 点「获取验证码」下发短信。
@@ -136,7 +139,7 @@ def _abspaths(csv: str | None) -> list[str]:
 
 
 def _profile_dir(base: str | None) -> Path:
-    root = Path(base).expanduser() if base else Path.home() / ".easel-browser-profiles"
+    root = account_scope.browser_base(base)
     return root / PROFILE_NAME
 
 

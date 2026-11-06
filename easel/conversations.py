@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import sqlite3
 import time
+import uuid
 
 
 class Conflict(Exception):
@@ -120,6 +121,26 @@ class Conversations:
                 data['titleLocked'] = True
             return self._put(db, data)
 
+    def transfer(self, identifier, revision, persona, *, copy=False):
+        """Fork visible history into a fresh runtime; move additionally tombstones the source."""
+        with self.transaction() as db:
+            source = self._get(db, identifier)
+            self._check(source, revision)
+            if source.get('pendingTurnId'):
+                raise Conflict('请先停止正在运行的对话')
+            data = {**source, 'id': 'shared_' + uuid.uuid4().hex,
+                    'persona': persona or None, 'revision': 1, 'created': int(time.time() * 1000),
+                    'archived': False, 'contextPending': True}
+            data['agentSessionId'] = data['id'].removeprefix('shared_')
+            for field in ('sessionKey', 'pendingTurnId', 'turnStarted'):
+                data.pop(field, None)
+            db.execute('INSERT INTO conversations(id, data, summary) VALUES (?, ?, ?)',
+                       (data['id'], json.dumps(data, ensure_ascii=False),
+                        json.dumps(self.summary(data), ensure_ascii=False)))
+            if not copy:
+                db.execute('UPDATE conversations SET deleted=1, data=?, summary=NULL WHERE id=?', ('{}', identifier))
+            return data
+
     @staticmethod
     def _check(data, revision):
         if data['revision'] != revision:
@@ -155,7 +176,7 @@ class Conversations:
             db.execute('INSERT INTO turns VALUES (?, ?)', (turn_id, identifier))
             return self._put(db, data)
 
-    def finish(self, identifier, turn_id, message, session_key=None, artifact_title=None):
+    def finish(self, identifier, turn_id, message, session_key=None, artifact_title=None, context_complete=True):
         with self.transaction() as db:
             data = self._get(db, identifier)
             if data.get('pendingTurnId') != turn_id:
@@ -165,6 +186,8 @@ class Conversations:
                 if not data.get('titleLocked', True):
                     data['title'] = artifact_title
             data['messages'].append(message)
+            if context_complete:
+                data.pop('contextPending', None)
             data.pop('pendingTurnId', None)
             data.pop('turnStarted', None)
             if session_key:
@@ -211,4 +234,4 @@ class Conversations:
             if not finished:
                 text += '\n\n（服务重启，本轮已中断。可以重试上一条消息。）'
             self.finish(data['id'], turn, {'role': 'assistant', 'content': text or '（无输出）',
-                                         'thinking': thinking, 'activity': '\n'.join(activity)})
+                                         'thinking': thinking, 'activity': '\n'.join(activity)}, context_complete=False)

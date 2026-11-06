@@ -111,4 +111,8 @@ def chat_turn_message(user_message: str, name: str | None) -> str:
     """
     prefix = persona_prefix(name)
     head = f"{prefix}\n\n" if prefix else ""
-    return f"{head}{user_message}\n\n{turn_reminder()}"
+    scope = (f"当前发布账号归属：{name or '通用模式'}。只使用本画像登录的账号；"
+             "未登录时请用户到当前画像的账号页登录，禁止借用通用模式或其他画像的账号。"
+             "发布、账号查询与数据回收使用项目内技能脚本，禁止用外部浏览器的已有登录态代替。"
+             "当前画像优先于历史对话中出现的画像和账号。")
+    return f"{head}{scope}\n\n{user_message}\n\n{turn_reminder()}"

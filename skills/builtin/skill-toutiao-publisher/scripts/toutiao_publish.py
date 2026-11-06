@@ -37,6 +37,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[4]))
+from easel import account_scope
+
 # PROJECT_ROOT：优先 EASEL_ROOT env（gateway/CLI/web 注入），否则按 __file__ 上溯。
 # ⚠️ 本脚本会被 openclaw/sync.sh 拍平复制到 workspace，那里相对层级会变——故 env 兜底不可省
 # （与 zhihu_answer.py / manifest.py 同款）。
@@ -48,7 +51,7 @@ if str(_SHARED_SCRIPTS) not in sys.path:
 import content_guard  # noqa: E402  出站内容安全闸门
 import output_paths  # noqa: E402  产物路径规约
 
-PROFILE_DIR = Path.home() / ".easel-browser-profiles" / "ToutiaoProfile"
+PROFILE_DIR = account_scope.browser_base() / "ToutiaoProfile"
 
 LOGIN_URL = "https://mp.toutiao.com/auth/page/login"
 PUBLISH_URL = "https://mp.toutiao.com/profile_v4/graphic/publish"

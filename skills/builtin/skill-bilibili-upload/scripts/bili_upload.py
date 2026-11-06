@@ -29,6 +29,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import os
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[4]))
+from easel import account_scope
 
 SHARED_SCRIPTS = Path(__file__).resolve().parents[3] / "shared" / "scripts"
 sys.path.insert(0, str(SHARED_SCRIPTS))
@@ -82,7 +85,7 @@ def resolve_tid(partition: str | None, tid: int | None) -> int:
 
 def build_cmd(a) -> list[str]:
     """构造 biliup upload 命令（纯函数，供测试）。全局选项在子命令前。"""
-    cookie = a.cookie or "cookies.json"
+    cookie = (str(account_scope.cookie_path(Path.cwd())) if account_scope.key() else a.cookie or "cookies.json")
     cmd = ["biliup", "-u", cookie]
     if getattr(a, "proxy", None):
         cmd += ["-p", a.proxy]
@@ -121,9 +124,10 @@ def cmd_check(_a) -> int:
 def cmd_login(a) -> int:
     if not _has_biliup():
         _die("未安装 biliup（pip install biliup）", 3)
-    cookie = a.cookie or "cookies.json"
+    cookie = (str(account_scope.cookie_path(Path.cwd())) if account_scope.key() else a.cookie or "cookies.json")
     print(f"启动 B站扫码登录，cookie 将保存到 {cookie} ...", file=sys.stderr)
     print("（需终端可显示二维码 + 手机 B站 App 扫码 + 外网）", file=sys.stderr)
+    Path(cookie).parent.mkdir(parents=True, exist_ok=True)
     return subprocess.call(["biliup", "-u", cookie, "login"], env=_direct_env())
 
 
@@ -151,7 +155,7 @@ def cmd_upload(a) -> int:
         return 0
     if not _has_biliup():
         _die("未安装 biliup", 3)
-    cookie = a.cookie or "cookies.json"
+    cookie = (str(account_scope.cookie_path(Path.cwd())) if account_scope.key() else a.cookie or "cookies.json")
     if not Path(cookie).is_file():
         _die(f"cookie 不存在：{cookie}，请先 `login`。")
     content_guard.guard_or_die(

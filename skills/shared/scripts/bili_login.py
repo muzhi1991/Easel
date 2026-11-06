@@ -20,6 +20,10 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import os
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 
@@ -31,9 +35,9 @@ UA = "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 BiliDroid/7.0.
 GEN_URL = "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code"
 POLL_URL = "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "bilibili.png"
-DEFAULT_COOKIE = PROJECT_ROOT / "cookies.json"
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+DEFAULT_QR_OUT = account_scope.directory(PROJECT_ROOT / "outputs" / "_login") / "bilibili.png"
+DEFAULT_COOKIE = account_scope.cookie_path(PROJECT_ROOT)
 
 
 def _die(msg: str, code: int = 1) -> None:

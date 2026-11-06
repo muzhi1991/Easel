@@ -82,3 +82,17 @@ test('incomplete account identity is refreshed after one minute instead of ten',
   assert.equal(view.pending.length, 1);
   assert.equal(view.pending[0].platform, 'xiaohongshu');
 });
+
+test('persona caches and pending verifications cannot leak the general account', async () => {
+  const view = setup();
+  view.exports.setWhoamiCache('wechat-oa', { loggedIn: true, name: '通用账号', avatar: '' });
+  assert.equal(view.exports.getWhoamiCache('养生')['wechat-oa'], undefined);
+  view.exports.verifyStale(['wechat-oa'], { persona: '养生' });
+  view.exports.verifyStale(['wechat-oa'], { persona: '科技' });
+  view.pending[1].resolve({ loggedIn: true, name: '科技账号', avatar: '' });
+  view.pending[0].resolve({ loggedIn: false, name: '', avatar: '' });
+  await settle();
+  assert.equal(view.exports.getWhoamiCache()['wechat-oa'].name, '通用账号');
+  assert.equal(view.exports.getWhoamiCache('养生')['wechat-oa'].loggedIn, false);
+  assert.equal(view.exports.getWhoamiCache('科技')['wechat-oa'].name, '科技账号');
+});

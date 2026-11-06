@@ -28,8 +28,12 @@ import time
 import urllib.request
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-BROWSER_PROFILES = Path.home() / ".easel-browser-profiles"
+import os
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
+
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+BROWSER_PROFILES = account_scope.browser_base()
 PROFILE = "JuejinProfile"
 
 API_USER = "https://api.juejin.cn/user_api/v1/user/get"

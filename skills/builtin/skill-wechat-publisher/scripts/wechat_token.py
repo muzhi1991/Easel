@@ -19,7 +19,8 @@ import requests
 from config import get_config
 
 
-TOKEN_CACHE_DIR = Path(__file__).parent
+from config import account_scope, _config_path
+TOKEN_CACHE_DIR = _config_path().parent if account_scope.key() else Path(__file__).parent
 TOKEN_SAFETY_MARGIN_SEC = 300  # 提前 5 分钟刷新
 TOKEN_TIMEOUT_SEC = 10
 TOKEN_API_URL = "https://api.weixin.qq.com/cgi-bin/token"

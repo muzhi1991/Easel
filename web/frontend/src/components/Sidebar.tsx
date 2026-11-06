@@ -1,5 +1,5 @@
 import SettingsSelect from './SettingsSelect';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import type { ComponentType } from 'react';
@@ -27,6 +27,7 @@ interface SidebarProps {
   onSessionDelete: (id: string) => void;
   onSessionRename: (id: string) => void;
   onSessionArchive: (id: string, archived: boolean) => void;
+  onTransfer: (id: string) => void;
   onNewChat: () => void;
   gatewayStatus: string;
   apiDirect: boolean;
@@ -58,6 +59,7 @@ export default function Sidebar({
   onSessionDelete,
   onSessionRename,
   onSessionArchive,
+  onTransfer,
   onNewChat,
   gatewayStatus,
   apiDirect,
@@ -66,8 +68,11 @@ export default function Sidebar({
 }: SidebarProps) {
   const [showArchived, setShowArchived] = useState(false);
 
-  const active = sessions.filter((s) => !s.archived && ((s.messageCount ?? s.messages.length) > 0 || s.id === activeSessionId));
-  const archived = sessions.filter((s) => s.archived);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { setShowAll(false); }, [selectedPersona]);
+  const visible = showAll ? sessions : sessions.filter(s => (s.persona || '') === selectedPersona);
+  const active = visible.filter((s) => !s.archived && ((s.messageCount ?? s.messages.length) > 0 || s.id === activeSessionId));
+  const archived = visible.filter((s) => s.archived);
 
   const renderItem = (s: ChatSession, isArchived: boolean) => {
     return (
@@ -76,8 +81,10 @@ export default function Sidebar({
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
         onClick={() => onSessionSelect(s.id)}
       >
-        <span className="session-item-title" title={s.title}>{s.title}{s.source !== 'server' && <small className="local-history-badge">本地旧记录</small>}</span>
+        <span className="session-item-title" title={s.title}>{s.title}{showAll && <small className="local-history-badge">{s.persona || '通用模式'}</small>}{s.source !== 'server' && <small className="local-history-badge">本地旧记录</small>}</span>
         <div className="session-actions">
+          <button className="session-act" title="复制或移动到画像" disabled={!!s.pendingTurnId}
+            onClick={(e) => { e.stopPropagation(); onTransfer(s.id); }}>↗</button>
           <button className="session-act" title="重命名"
             onClick={(e) => { e.stopPropagation(); onSessionRename(s.id); }}><IconEdit size={14} /></button>
           <button className="session-act" title={isArchived ? '取消归档' : '归档'}
@@ -100,7 +107,7 @@ export default function Sidebar({
           <ThemeToggle />
         </div>
         <SettingsSelect className="persona-control" label="选择用户画像"
-          title={currentPage === 'chat' ? '选择画像；已有消息时切换会新建对话' : '选择当前任务使用的画像，不影响历史对话'}
+          title={currentPage === 'chat' ? '选择画像，查看该画像的对话' : '选择当前任务使用的画像，不影响历史对话'}
           value={selectedPersona}
           options={[{ value: '', label: '通用模式' },
             ...personas.map(p => ({ value: p.name, label: p.name })),
@@ -131,6 +138,9 @@ export default function Sidebar({
             <IconNewChat size={13} /> 新对话
           </button>
         </div>
+        <button className="local-history-import" aria-pressed={showAll} onClick={() => setShowAll(v => !v)}>
+          {showAll ? '只看当前画像' : '显示所有画像对话'}
+        </button>
         {active.map((s) => renderItem(s, false))}
         {sessions.some((s) => s.source !== 'server' && s.messages.length > 0) && <button
           className="local-history-import" onClick={onImportLocal}>迁移本浏览器旧对话</button>}

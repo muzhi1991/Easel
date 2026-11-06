@@ -190,7 +190,7 @@ function ProfileDetail({ persona, onDeleted, onBack, onUsePersona, inUse }: Prof
   const handleFetchWechat = async (filename: string) => {
     setFetchingWx(true);
     try {
-      const a = await fetchAccountAnalytics('wechat-oa');
+      const a = await fetchAccountAnalytics('wechat-oa', persona);
       if (!a.loggedIn) {
         showToast('公众号后台未登录：请先到「账号」页扫码登录后再抓取');
         return;
