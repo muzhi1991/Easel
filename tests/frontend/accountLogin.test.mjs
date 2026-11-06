@@ -29,6 +29,7 @@ test('a failed old avatar does not prevent a newly verified avatar from renderin
   );
   let broken = '';
   const render = runInNewContext(compiled, {
+    persona: '',
     exports: {},
     useState: () => [broken, value => { broken = value; }],
     require: () => ({ jsx: (type, props) => ({ type, props }) }),
@@ -53,6 +54,7 @@ test('manual account verification updates the card and identity from the same re
   let accounts = [{ platform: 'wechat-oa', loggedIn: true }];
   let identity = {};
   const verify = runInNewContext(compiled, {
+    persona: '',
     useCallback: callback => callback,
     whoamiRequests: { current: {} },
     aliveRef: { current: true },
@@ -82,6 +84,7 @@ test('failed account verification preserves the last verified nickname and avata
   const cached = { loggedIn: true, name: 'Own channel', avatar: 'https://self.test/channel.png' };
   let identity = { 'weixin-channels': cached };
   const verify = runInNewContext(compiled, {
+    persona: '',
     useCallback: callback => callback,
     whoamiRequests: { current: {} },
     aliveRef: { current: true },
@@ -110,6 +113,7 @@ function setup() {
     state[key] = typeof value === 'function' ? value(state[key]) : value;
   };
   const handlers = runInNewContext(outputText, {
+    persona: '',
     Error,
     useCallback: callback => callback,
     qrRequest, aliveRef, pollRef,

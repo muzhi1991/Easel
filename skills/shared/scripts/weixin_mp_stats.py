@@ -21,6 +21,9 @@ import sys
 import time
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
 from urllib.parse import unquote, urlparse
 
 if os.name == "nt":
@@ -31,8 +34,8 @@ else:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LOGIN_DIR = PROJECT_ROOT / "outputs" / "_login"
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+LOGIN_DIR = account_scope.directory(PROJECT_ROOT / "outputs" / "_login")
 PROFILE_NAME = "WeixinMpProfile"
 MP_HOME = "https://mp.weixin.qq.com/"
 LAUNCH_ARGS = [
@@ -57,7 +60,7 @@ def _die(msg, code=1):
 
 
 def _profile_dir(base):
-    root = Path(base).expanduser() if base else Path.home() / ".easel-browser-profiles"
+    root = account_scope.browser_base(base)
     return root / PROFILE_NAME
 
 

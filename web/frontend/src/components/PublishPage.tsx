@@ -97,7 +97,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
   // 登录态 + 可选媒体列表
   useEffect(() => {
-    fetchAccounts().then(setAccounts).catch(() => { /* 忽略 */ });
+    fetchAccounts(persona).then(setAccounts).catch(() => { /* 忽略 */ });
     fetchOutputs().then((roots) => {
       const files: OutputFile[] = [];
       const walk = (n: OutputFile) => {
@@ -272,7 +272,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
         resolve(); return;
       }
       let s;
-      try { s = await publishStatus(key); } catch { return; }  // 单次失败忽略
+      try { s = await publishStatus(key, persona); } catch { return; }  // 单次失败忽略
       if (s.state === 'sms_required' || s.state === 'verifying') {
         setPubSms({ platform: key, name: label, state: s.state, message: s.message });
         setPub((r) => ({ ...r, [key]: { status: 'publishing', msg: s.message || '需短信验证' } }));

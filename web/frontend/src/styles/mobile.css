@@ -43,7 +43,7 @@
   .sidebar-logo { padding-right: 38px; }
   .sidebar .nav-item, .persona-select, .sidebar .new-chat-btn { min-height: 44px; }
   .session-item { min-height: 44px; }
-  .session-actions { opacity: 1; }
+  .session-actions { display: flex; opacity: 1; }
   .session-act { min-width: 30px; min-height: 36px; }
   .main-content { height: auto; min-height: 0; width: 100%; }
   .page-scroll, .gallery-page, .accounts-page, .profile-page, .skills-page {

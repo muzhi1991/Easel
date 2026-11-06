@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from easel.openclaw_cmd import openclaw_base_cmd
+from easel import account_scope
 from easel.persona import persona_prefix, profile_exists
 from easel.timeouts import TIMEOUT_PRODUCE
 from easel.direct_api import read_settings
@@ -94,12 +95,13 @@ def _proxy_env() -> dict[str, str]:
                             "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*",
                             env_file=PROJECT_ROOT / ".env")
     env.setdefault("EASEL_ROOT", str(PROJECT_ROOT))
-    return env
+    return account_scope.environment(env)
 
 
 def _run_via_openclaw(message: str, timeout: int = 300) -> int:
     """统一通过 OpenClaw agent 执行。"""
     session_key = f"skill-{int(time.time() * 1000)}"
+    account_scope.bind_session(PROJECT_ROOT / "outputs" / "_sessions", session_key, account_scope.persona())
 
     cmd = openclaw_base_cmd() + [
         "--profile", OPENCLAW_PROFILE,
@@ -168,6 +170,7 @@ def cmd_skill(args) -> int:
     # 构造消息——发给 OpenClaw，让它按 AGENTS.md 规则处理
     content = _resolve_input(args.input)
 
+    account_scope.current_persona.set(args.profile or '')
     message = f"{persona_prefix(args.profile)}请执行 /{skill_full}，内容如下：\n\n{content}"
 
     # 统一给足超时：制作类 SKILL（生视频/多镜合成）可能跑很久，取安全上界
@@ -180,7 +183,7 @@ def cmd_skill(args) -> int:
 
     if runtime != "openclaw":
         try:
-            asyncio.run(harnesses.console_turn(message, PROJECT_ROOT, settings, timeout=timeout))
+            asyncio.run(harnesses.console_turn(message, PROJECT_ROOT, account_scope.environment(settings), timeout=timeout))
             print()
             return 0
         except (HarnessError, asyncio.TimeoutError) as error:

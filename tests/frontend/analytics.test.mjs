@@ -23,6 +23,7 @@ function setup() {
   let data = {}, errors = {};
   const pending = [], storage = new Map(), exports = {};
   runInNewContext(outputText, {
+    persona: '',
     exports, Error,
     anaPending: { current: new Set() },
     setAnaSel: () => {},
@@ -74,11 +75,12 @@ test('analytics requests have platform-specific bounded deadlines', async () => 
   const apiParsed = ts.createSourceFile('api.ts', api, ts.ScriptTarget.Latest, true);
   const fetchDeclaration = apiParsed.statements.find(node =>
     ts.isFunctionDeclaration(node) && node.name?.text === 'fetchAccountAnalytics');
-  const compiled = ts.transpileModule(fetchDeclaration.getText(apiParsed), {
+  const compiled = ts.transpileModule(apiParsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'accountUrl').getText(apiParsed) + '\n' + fetchDeclaration.getText(apiParsed), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   const exports = {}, calls = [];
   runInNewContext(compiled, {
+    persona: '',
     exports, encodeURIComponent,
     AbortSignal: { timeout: duration => ({ duration }) },
     request: async (path, options) => { calls.push({ path, options }); return {}; },

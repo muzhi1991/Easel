@@ -70,3 +70,11 @@ export const suggestSessionTitle = (session: ChatSession, messageIndex?: number)
   request<{ title: string }>(`/${encodeURIComponent(session.id)}/suggest-title`, 'POST', {
     messageIndex, historyEpoch: session.historyEpoch || 0,
   });
+
+export async function transferSharedSession(session: ChatSession, persona: string, copy: boolean) {
+  const saved = summarySession(await request<Omit<ChatSession, 'messages'>>(
+    `/${encodeURIComponent(session.id)}/transfer`, 'POST', { revision: session.revision, persona, copy }));
+  if (!copy) await removeCachedSession(session.id);
+  await cacheSummaries([saved], false);
+  return saved;
+}

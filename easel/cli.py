@@ -26,6 +26,7 @@ from easel.commands.skill import cmd_skill
 from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
+from easel import account_scope
 from easel.persona import chat_turn_message
 from easel.persona import load_profile_text
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, history_path,
@@ -131,6 +132,7 @@ def cmd_chat(_args) -> int:
         print(f"\n  {YELLOW}→{NC} 通用模式")
 
     session_key = f"easel-{time.strftime('%m%d-%H%M%S')}"
+    account_scope.bind_session(PROJECT_ROOT / "outputs" / "_sessions", session_key, selected_persona or "")
 
     settings = read_settings()
     runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
@@ -152,7 +154,7 @@ def cmd_chat(_args) -> int:
                     # chat 可能中途触发制作层任务，console_turn 默认 1800s 会把它掐断。
                     _, native_id = asyncio.run(harnesses.console_turn(
                         chat_turn_message(message, selected_persona), PROJECT_ROOT,
-                        {**settings, **_proxy_env()}, native_id, on_bind=remember,
+                        {**settings, **_proxy_env(), "EASEL_ACCOUNT_PERSONA": selected_persona or ""}, native_id, on_bind=remember,
                         timeout=TIMEOUT_CHAT))
                     print()
             except (EOFError, KeyboardInterrupt):

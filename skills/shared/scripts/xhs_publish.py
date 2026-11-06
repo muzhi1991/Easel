@@ -34,6 +34,9 @@ import re
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -88,8 +91,8 @@ SELECTORS = {
 }
 
 PROFILE_NAME = "XiaohongshuProfile"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_QR_OUT = PROJECT_ROOT / "outputs" / "_login" / "xhs-login-qrcode.png"
+PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[3])
+DEFAULT_QR_OUT = account_scope.directory(PROJECT_ROOT / "outputs" / "_login") / "xhs-login-qrcode.png"
 
 # Chromium 启动性能参数（提速冷启动；勿禁用图片——二维码是图片）
 LAUNCH_ARGS = [
@@ -138,7 +141,7 @@ def _abspaths(csv: str | None) -> list[str]:
 
 
 def _profile_dir(base: str | None) -> Path:
-    root = Path(base).expanduser() if base else Path.home() / ".easel-browser-profiles"
+    root = account_scope.browser_base(base)
     return root / PROFILE_NAME
 
 

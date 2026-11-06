@@ -38,6 +38,9 @@ import signal
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[3]))
+from easel import account_scope
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -581,7 +584,7 @@ def _steps_key_for(cfg: dict, media: str | None) -> str:
 
 
 def _profile_dir(platform: str, base: str | None) -> Path:
-    root = Path(base).expanduser() if base else Path.home() / ".easel-browser-profiles"
+    root = account_scope.browser_base(base)
     return root / PLATFORMS[platform]["profile"]
 
 

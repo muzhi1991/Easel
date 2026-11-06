@@ -13,6 +13,10 @@
 import os
 import json
 from pathlib import Path
+
+import sys
+sys.path.insert(0, os.environ.get("EASEL_ROOT") or str(Path(__file__).resolve().parents[4]))
+from easel import account_scope
 from typing import Optional, Dict, List, Any
 
 try:
@@ -57,7 +61,7 @@ UNIFIED_CONFIG_NAME = "wechat-publisher.yaml"
 
 
 def _config_path() -> Path:
-    return Path(__file__).parent.parent / UNIFIED_CONFIG_NAME
+    return account_scope.wechat_config(Path(os.environ["EASEL_ROOT"]) / "skills/builtin/skill-wechat-publisher" / UNIFIED_CONFIG_NAME if os.environ.get("EASEL_ROOT") else Path(__file__).resolve().parent.parent / UNIFIED_CONFIG_NAME)
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
