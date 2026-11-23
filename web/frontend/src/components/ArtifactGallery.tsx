@@ -73,11 +73,24 @@ function HtmlArtifact({ artifact }: { artifact: Artifact }) {
   );
 }
 
+/** Each mount must bypass decoded-image reuse after an agent replaces a local file. */
+function ImageArtifact({ artifact, onError }: { artifact: Artifact; onError: () => void }) {
+  const [src] = useState(() => {
+    if (!artifact.url.startsWith('/api/media/')) return artifact.url;
+    const url = new URL(artifact.url, 'http://easel.local');
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      byte => byte.toString(16).padStart(2, '0')).join('');
+    url.searchParams.set('_easel_preview', nonce);
+    return url.pathname + url.search + url.hash;
+  });
+  return <img src={src} alt={artifact.name} onError={onError} />;
+}
+
 function ArtifactPreview({ artifact }: { artifact: Artifact }) {
   const [error, setError] = useState(false);
   if (error) return <div className="artifact-hint">预览加载失败，可打开或下载原文件</div>;
   if (artifact.kind === 'html') return <HtmlArtifact artifact={artifact} />;
-  if (artifact.kind === 'image') return <img src={artifact.url} alt={artifact.name} onError={() => setError(true)} />;
+  if (artifact.kind === 'image') return <ImageArtifact key={artifact.url} artifact={artifact} onError={() => setError(true)} />;
   if (artifact.kind === 'video') return <video src={artifact.url} controls preload="metadata" onError={() => setError(true)} />;
   if (artifact.kind === 'audio') return <audio src={artifact.url} controls preload="metadata" onError={() => setError(true)} />;
   return <iframe src={artifact.url} title={artifact.name} sandbox="" />;
