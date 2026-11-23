@@ -4842,10 +4842,10 @@ async def api_output(path: str):
 async def api_media(path: str, download: bool = False):
     """原样输出媒体文件（图片/视频/音频/HTML/PDF），供 <img>/<video>/iframe/下载。"""
     full = _safe_output_path(path)
-    # HTML 预览会在本地被就地重新生成（如 gzh-design 重排/内联图片），必须禁缓存，
-    # 否则浏览器/代理按启发式缓存旧版 → 内容库 iframe 打开的是过期预览（复制粘贴带旧图 URL）。
+    # HTML 与图片均可能被原地替换（尤其是登录二维码的项目副本）。
+    # 禁止浏览器/代理缓存旧内容；聊天新消息另用独立加载地址避开已解码图片复用。
     headers = ({"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
-               if full.suffix.lower() in {".html", ".htm"} else {})
+               if full.suffix.lower() in IMAGE_EXTS | {".html", ".htm"} else {})
     return FileResponse(full, headers=headers, filename=full.name if download else None)
 
 

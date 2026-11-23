@@ -35,3 +35,24 @@ for (const secure of [false, true]) {
     assert.match(html, /card.html/);
   });
 }
+
+test('new messages reload overwritten local images without changing original links', () => {
+  const Gallery = load('components/ArtifactGallery.tsx', webcrypto).default;
+  const url = '/api/media/project/qr.png?existing=1';
+  const render = () => renderToString(React.createElement(Gallery, { artifacts: [{
+    kind: 'image', name: 'qr.png', url,
+  }] }));
+  const first = render();
+  const second = render();
+  const src = html => html.match(/<img[^>]+src="([^"]+)"/)[1];
+  assert.notEqual(src(first), src(second));
+  assert.match(src(first), /existing=1&amp;_easel_preview=/);
+  assert.ok(first.includes(`href="${url}"`));
+});
+
+test('remote image URLs keep signatures intact', () => {
+  const Gallery = load('components/ArtifactGallery.tsx', webcrypto).default;
+  const url = 'https://example.test/qr.png?signature=abc';
+  const html = renderToString(React.createElement(Gallery, { artifacts: [{ kind: 'image', name: 'qr.png', url }] }));
+  assert.ok(html.includes(`src="${url}"`));
+});
