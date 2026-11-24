@@ -85,8 +85,8 @@ def test_verify_decodes_real_frames_and_rejects_silent_audio(tmp_path,silent):
     report=tmp_path/'outputs/paper/qa/report.json'
     result=run(VIDEO,tmp_path,'verify',video,'--report',report,'--duration','1','--fps','5','--width','384','--height','216')
     data=json.loads(report.read_text(encoding='utf-8'))
-    assert data['decoded_frames']==5
-    assert data['technical_pass'] is (not silent)
+    assert data['decoded_frames']==5, data
+    assert data['technical_pass'] is (not silent), data
     assert result.returncode==(1 if silent else 0)
     if silent:
         assert 'Audio track is silent' in data['technical_errors']
