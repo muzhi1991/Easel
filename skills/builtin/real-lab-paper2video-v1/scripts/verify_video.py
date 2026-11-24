@@ -48,7 +48,7 @@ def main():
     if not a and not args.allow_silent:errors.append('Missing audio track')
     black=[];uniform=[];flashes=[];n=0;prev=None;prevprev=None;lastdiff=0
     with tempfile.TemporaryFile() as stderr:
-        proc=subprocess.Popen(['ffmpeg','-v','error','-i',str(video),'-map','0:v:0','-vf','scale=320:180,format=gray','-vsync','0','-f','rawvideo','-'],stdout=subprocess.PIPE,stderr=stderr)
+        proc=subprocess.Popen(['ffmpeg','-v','error','-i',str(video),'-map','0:v:0','-vf','scale=320:180,format=gray','-fps_mode','passthrough','-f','rawvideo','-'],stdout=subprocess.PIPE,stderr=stderr)
         while True:
             data=proc.stdout.read(320*180)
             if not data:break
@@ -74,7 +74,7 @@ def main():
         if any(not isinstance(i,int) or i<0 or i>=n for i in indices):raise ValueError('Reference frame outside video')
         with tempfile.TemporaryDirectory(prefix='paper2video-frames-') as temp:
             expr='+'.join(f'eq(n,{i})' for i in indices)
-            subprocess.run(['ffmpeg','-v','error','-y','-i',str(video),'-vf',f"select='{expr}'",'-vsync','0','-start_number','0',str(Path(temp)/'%06d.png')],check=True)
+            subprocess.run(['ffmpeg','-v','error','-y','-i',str(video),'-vf',f"select='{expr}'",'-fps_mode','passthrough','-start_number','0',str(Path(temp)/'%06d.png')],check=True)
             mapping={frame:Path(temp)/f'{j:06d}.png' for j,frame in enumerate(indices)}
             for s in samples:
                 ref=(args.references.parent/s['path']).resolve()

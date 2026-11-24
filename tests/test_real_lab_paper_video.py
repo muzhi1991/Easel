@@ -75,7 +75,8 @@ def test_crop_refuses_an_external_backup_directory_before_modifying_image(tmp_pa
 
 @pytest.mark.skipif(not shutil.which('ffmpeg') or not shutil.which('ffprobe'),reason='FFmpeg/FFprobe unavailable')
 @pytest.mark.parametrize('silent',[False,True])
-def test_verify_decodes_real_frames_and_rejects_silent_audio(tmp_path,silent):
+@pytest.mark.parametrize('references',[False,True])
+def test_verify_decodes_real_frames_and_rejects_silent_audio(tmp_path,silent,references):
     video=tmp_path/'outputs/paper/final.mp4'
     video.parent.mkdir(parents=True)
     audio='anullsrc=r=48000:cl=mono' if silent else 'sine=frequency=440:sample_rate=48000:duration=1'
@@ -83,10 +84,24 @@ def test_verify_decodes_real_frames_and_rejects_silent_audio(tmp_path,silent):
                     '-f','lavfi','-i',audio,'-t','1','-c:v','libx264','-pix_fmt','yuv420p','-threads','1',
                     '-c:a','aac',str(video)],check=True,capture_output=True,timeout=30)
     report=tmp_path/'outputs/paper/qa/report.json'
-    result=run(VIDEO,tmp_path,'verify',video,'--report',report,'--duration','1','--fps','5','--width','384','--height','216')
+    extra=[]
+    if references:
+        samples=[]
+        for frame in (0,4):
+            image=video.parent/f'reference-{frame}.png'
+            subprocess.run(['ffmpeg','-v','error','-y','-i',str(video),'-ss',str(frame/5),
+                            '-frames:v','1',str(image)],check=True,capture_output=True,timeout=30)
+            samples.append({'frame':frame,'path':image.name})
+        reference_file=video.parent/'references.json'
+        reference_file.write_text(json.dumps(samples),encoding='utf-8')
+        extra=['--references',reference_file]
+    result=run(VIDEO,tmp_path,'verify',video,'--report',report,'--duration','1','--fps','5','--width','384','--height','216',*extra)
     data=json.loads(report.read_text(encoding='utf-8'))
     assert data['decoded_frames']==5, data
     assert data['technical_pass'] is (not silent), data
     assert result.returncode==(1 if silent else 0)
+    if references:
+        assert [item['frame'] for item in data['reference_comparisons']]==[0,4]
+        assert all(item['mean_absolute_pixel_error']==0 for item in data['reference_comparisons'])
     if silent:
         assert 'Audio track is silent' in data['technical_errors']
